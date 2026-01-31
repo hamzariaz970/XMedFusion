@@ -8,7 +8,7 @@ from pathlib import Path
 from langchain_community.chat_models import ChatOllama
 
 # NEW: validator (create validators.py as shown below, or paste it into this file)
-from validators import validate_report
+from backend.validators import validate_report
 
 # Import from draft.py
 from draft import (
