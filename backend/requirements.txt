@@ -8,7 +8,7 @@ altair==5.5.0
 annotated-doc==0.0.4
 annotated-types==0.6.0
 anyio==4.12.0
-appnope==0.1.4
+#appnope==0.1.4
 argon2-cffi==23.1.0
 argon2-cffi-bindings==21.2.0
 arrow==1.3.0
@@ -20,7 +20,7 @@ attrs==23.2.0
 audioread==3.0.1
 babel==2.17.0
 beautifulsoup4==4.13.3
-bitsandbytes==0.42.0
+#bitsandbytes==0.42.0
 bleach==6.2.0
 blinker==1.9.0
 Brotli==1.1.0
@@ -262,8 +262,8 @@ tenacity==8.2.3
 tensorboard==2.18.0
 tensorboard-data-server==0.7.2
 tensorflow==2.18.0
-tensorflow-io-gcs-filesystem==0.37.0
-tensorflow-metal==1.2.0
+#tensorflow-io-gcs-filesystem==0.37.0
+#tensorflow-metal==1.2.0
 termcolor==2.5.0
 terminado==0.18.1
 tf_keras==2.18.0
@@ -293,7 +293,7 @@ uri-template==1.3.0
 uritemplate==4.2.0
 urllib3==2.2.1
 uvicorn==0.38.0
-uvloop==0.22.1
+#uvloop==0.22.1
 watchfiles==1.1.1
 wcwidth==0.2.13
 webcolors==24.11.1
