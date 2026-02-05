@@ -126,6 +126,19 @@ git clone <YOUR_GIT_URL>
 # Navigate into the project directory
 cd <YOUR_PROJECT_NAME>
 
+# Navigate to backend folder
+cd backend
+
+# Create conda environment
+conda create --name xmedfusion_env python=3.10
+
+# Install dependencies
+pip install -r requirements.txt
+
+
+# Navigate to frontend folder
+cd frontend
+
 # Install dependencies
 npm install
 
