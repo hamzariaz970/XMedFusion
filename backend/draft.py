@@ -13,6 +13,8 @@ from torch.nn.functional import cosine_similarity
 # CHANGED: Using native ChatOllama for better handling of deepseek outputs
 from langchain_community.chat_models import ChatOllama 
 
+import config
+
 # Suppress specific torch load warnings for cleaner output
 warnings.filterwarnings("ignore", category=FutureWarning)
 
@@ -144,15 +146,14 @@ class RetrievalAgent:
 # Local LLM Agent using Ollama (Corrected)
 # -------------------------------
 class LocalLLMReportAgent:
-    def __init__(self, model_name="deepseek-r1:1.5b"):
-        # Strip 'ollama/' prefix if present, ChatOllama expects just the model name
-        if model_name.startswith("ollama/"):
-            model_name = model_name.split("/", 1)[1]
+    def __init__(self, model_name=config.OLLAMA_MODEL): 
+            if model_name.startswith("ollama/"):
+                model_name = model_name.split("/", 1)[1]
             
-        self.llm = ChatOllama(
-            model=model_name, 
-            temperature=0.1  # Low temp for deterministic medical reports
-        )
+            self.llm = ChatOllama(
+                model=model_name, 
+                temperature=config.TEMPERATURE
+            )
 
     def generate_report(self, visual_description):
         prompt = (
@@ -216,3 +217,49 @@ if __name__ == "__main__":
         print(draft_report)
     else:
         print("❌ Could not run pipeline: Missing image or empty reports dictionary.")
+
+
+
+
+def zero_shot_classify(image_path, model, preprocess, device):
+    """
+    Scans the image for specific medical labels using CLIP.
+    Returns a string like: "Cardiomegaly (85%), Edema (12%)"
+    """
+    # 1. Define labels to check
+    labels = [
+        "Normal", "Cardiomegaly", "Pleural Effusion", "Pneumothorax", 
+        "Edema", "Consolidation", "Atelectasis", "Lung Opacity", "Fracture"
+    ]
+    
+    # 2. Create sentence prompts
+    text_prompts = [f"A chest x-ray showing {label}" for label in labels]
+    
+    # 3. Load & Encode Image
+    try:
+        image = preprocess(Image.open(image_path)).unsqueeze(0).to(device)
+    except Exception as e:
+        return f"Error processing image: {e}"
+    
+    # 4. Encode Text & Compare
+    text_tokens = clip.tokenize(text_prompts).to(device)
+    
+    with torch.no_grad():
+        img_features = model.encode_image(image)
+        text_features = model.encode_text(text_tokens)
+        
+        # Normalize features
+        img_features /= img_features.norm(dim=-1, keepdim=True)
+        text_features /= text_features.norm(dim=-1, keepdim=True)
+        
+        # Calculate similarity (scale by 100 for percentage)
+        similarity = (100.0 * img_features @ text_features.T).softmax(dim=-1)
+        values, indices = similarity[0].topk(3) # Top 3 matches
+
+    # 5. Format Output
+    results = []
+    for value, index in zip(values, indices):
+        prob = value.item() * 100 # Convert to readable percentage if needed, or keep raw
+        results.append(f"{labels[index]} ({value.item():.1f}%)")
+    
+    return ", ".join(results)

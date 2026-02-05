@@ -12,12 +12,14 @@ from torchvision import transforms
 import timm
 from langchain_community.chat_models import ChatOllama
 
+import config
+
 # Suppress warnings
 warnings.filterwarnings("ignore", category=FutureWarning)
 warnings.filterwarnings("ignore", category=UserWarning)
 
 # -------------------------------
-# Device
+# Device Configuration
 # -------------------------------
 if torch.cuda.is_available():
     device = torch.device("cuda")
@@ -31,6 +33,10 @@ print(f"Using device: {device}")
 # -------------------------------
 # Model Definitions
 # -------------------------------
+# Note: We are keeping VisionEncoderWithProjection and ProjectionHeads classes
+# in case you want to revert to embedding-based retrieval later, but they are
+# no longer critical for the Zero-Shot classification path.
+
 class VisionEncoderWithProjection(nn.Module):
     def __init__(self, device="cuda", vit_name="vit_base_patch16_224", embed_dim=768, dropout_prob=0.1):
         super().__init__()
@@ -52,6 +58,7 @@ class VisionEncoderWithProjection(nn.Module):
         images = images.to(self.device)
         with torch.no_grad():
             patch_tokens = self.visual_extractor.forward_features(images)
+        # remove cls token
         patch_tokens = patch_tokens[:, 1:, :]
         visual_tokens = self.visual_projection(patch_tokens)
         return visual_tokens
@@ -93,6 +100,9 @@ def preprocess_image(image_path):
     img = Image.open(image_path).convert("RGB")
     return image_transform(img).unsqueeze(0)
 
+# -------------------------------
+# Embeddings Logic (Maintained for backward compatibility)
+# -------------------------------
 def get_visual_embeddings(image_paths, vision_model, proj_heads):
     vision_model.eval()
     proj_heads.eval()
@@ -115,12 +125,15 @@ def get_visual_embeddings(image_paths, vision_model, proj_heads):
     return img_embeds
 
 def embeddings_to_text(img_embed, top_k=12):
+    # DEPRECATED: This causes hallucinations in small LLMs
+    # Kept only to avoid breaking legacy calls if any exist
+    if img_embed is None: return ""
     vec = img_embed.squeeze().cpu().numpy()
     idx = np.argsort(vec)[-top_k:][::-1]
     return ", ".join([f"dim{int(i)}={vec[i]:.2f}" for i in idx])
 
 # -------------------------------
-# GLOBAL INITIALIZATION (Fixes ImportError)
+# GLOBAL INITIALIZATION
 # -------------------------------
 
 # 1. Initialize Models Globally
@@ -128,7 +141,6 @@ vision_model = VisionEncoderWithProjection(device=device).to(device)
 proj_heads = ProjectionHeads(img_dim=768, txt_dim=384, embed_dim=256).to(device)
 
 # 2. Load Weights (Global Scope)
-# Adjust paths as needed. Using relative paths assuming execution from project root.
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJ_CKPT = os.path.join(BASE_DIR, "model_weights/Vision_Agent/proj_heads.pth")
 
@@ -139,26 +151,35 @@ if os.path.exists(PROJ_CKPT):
     except Exception as e:
         print(f"⚠️ Error loading projection heads: {e}")
 else:
-    print(f"⚠️ Projection checkpoint not found at {PROJ_CKPT}. Using random weights.")
+    print(f"⚠️ Projection checkpoint not found. Using random weights (Zero-Shot mode unaffected).")
 
 # Ensure models are in eval mode
 vision_model.eval()
 proj_heads.eval()
 
 # -------------------------------
-# Local LLM Agent
+# Local LLM Agent (Vision Specific)
 # -------------------------------
 class LocalLLMReportAgent:
-    def __init__(self, model_name="deepseek-r1:1.5b"):
-        if model_name.startswith("ollama/"):
-            model_name = model_name.split("/", 1)[1]
-        self.llm = ChatOllama(model=model_name, temperature=0.1)
-
+    def __init__(self, model_name=config.OLLAMA_MODEL): 
+            if model_name.startswith("ollama/"):
+                model_name = model_name.split("/", 1)[1]
+            
+            self.llm = ChatOllama(
+                model=model_name, 
+                temperature=config.TEMPERATURE
+            )
     def generate_report(self, visual_description):
+        # NOTE: 'visual_description' will now be a string of diseases 
+        # (e.g., "Cardiomegaly (85%), Edema (10%)") passed from synthesis.py
+        # rather than the old raw embeddings.
+        
         prompt = (
             "You are an expert thoracic radiologist. "
-            "Using the following X-ray image features, generate a formal radiology report...\n"
-            f"Visual Features: {visual_description}\n"
+            "Using the following detected findings, describe the visual appearance of the X-ray.\n"
+            "Do NOT diagnose. Just describe what is seen based on the probability scores provided.\n\n"
+            f"Detected Visual Findings: {visual_description}\n\n"
+            "Output a brief visual summary (2-3 sentences)."
         )
         response = self.llm.invoke(prompt)
         content = response.content if hasattr(response, "content") else str(response)
@@ -169,15 +190,17 @@ class LocalLLMReportAgent:
 # Main Execution (Test Only)
 # -------------------------------
 if __name__ == "__main__":
-    # This block now just tests the GLOBALLY defined models
     print("\n--- Running Vision Module Test ---")
     
+    # Test path - adjust as needed
     test_image = "data/iu_xray/images/CXR688_IM-2256/0.png"
+    
     if os.path.exists(test_image):
+        print(f"Found image: {test_image}")
+        # Note: To test the new zero-shot logic, you would typically run draft.zero_shot_classify
+        # This block just confirms the model weights loaded correctly.
         emb = get_visual_embeddings([test_image], vision_model, proj_heads)
         if emb is not None:
-            print("Embeddings generated successfully.")
-            txt = embeddings_to_text(emb)
-            print("Text desc:", txt)
+            print(f"Vision Encoder is working. Embeddings shape: {emb.shape}")
     else:
         print(f"Test image not found at {test_image}")

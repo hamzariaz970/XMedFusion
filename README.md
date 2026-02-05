@@ -23,6 +23,7 @@ The current implementation emphasizes **system design, UI flow, and research arc
 * Introduces the project motivation and goals
 * Explains the overall workflow from image upload to report generation
 * Provides navigation to all other pages
+![alt text](screenshots\landing_page.png)
 
 ### 2. X-ray Upload and Report Generation Page
 * Allows users to upload chest X-ray images
@@ -30,9 +31,10 @@ The current implementation emphasizes **system design, UI flow, and research arc
     * DICOM
     * JPEG
     * PNG
-* Applies image preprocessing (currently hardcoded)
+* Applies image preprocessing
 * Displays a "Generating Report" status
-* Shows a generated radiology report (currently hardcoded)
+* Shows a generated radiology report
+![alt text](screenshots\upload_xray_page.png)
 
 This page simulates how an AI system would process medical images and produce clinically structured text.
 
@@ -44,6 +46,7 @@ This page simulates how an AI system would process medical images and produce cl
     * Clinical concepts
 * Displays edges representing relationships between concepts
 * All nodes and links are currently hardcoded for demonstration
+![alt text](screenshots\kg_page.png)
 
 This page highlights how structured medical knowledge can be used to ground and explain AI-generated reports.
 
@@ -73,31 +76,25 @@ The project is conceptually designed as an **agentic AI framework** for radiolog
 The current frontend mirrors this architecture even though backend reasoning is mocked.
 
 ---
-
 ## Technologies and Methods
 
 **Frontend and System Design**
 * Modern web frontend framework
 * Multi-page navigation with clean UI
-* Placeholder-driven prototyping
 
-**AI and Research Stack (Conceptual and Evaluated Separately)**
+**AI and Research Stack**
 * PyTorch
-* Transformers: T5, FLAN-T5, BART
-* CNNs and Vision Transformers:
-    * ResNet-101
-    * Swin Transformer
-* CLIP for vision-language alignment
-* Knowledge Graphs for structured reasoning
+* **Ollama (Local LLM Inference)**
+* Transformers: CLIP, Vision Transformers
 * Multi-Agent Systems
 * Python
 * Medical imaging and DICOM processing
 
 ---
 
-## Data and Model Setup
+## 🛠️ Prerequisites & Setup
 
-Before running the application, you must set up the dataset and model weights directories as follows:
+Before running the application, you must set up the **Dataset**, **Model Weights**, and **Ollama Backend**.
 
 ### 1. Dataset Setup
 1.  Download the **IU X-Ray Dataset** from Kaggle:
@@ -105,7 +102,7 @@ Before running the application, you must set up the dataset and model weights di
 2.  Create a folder named `data` in the root directory of this project.
 3.  Extract and place the dataset files inside the `data` folder.
 
-### 2. Model Weights Setup
+### 2. Custom Model Weights Setup
 1.  Download the required model weights from the following link:
     * [Google Drive - Model Weights](https://drive.google.com/drive/folders/1ofqBS3rrLMdovOXTcNDudWpSV7nSTvd1?usp=sharing)
 2.  Create a folder named `model_weights` in the root directory.
@@ -115,27 +112,61 @@ Before running the application, you must set up the dataset and model weights di
     * `Vision_Agent`
 4.  Place the relevant downloaded weight files into their respective sub-folders.
 
+### 3. Ollama & LLM Setup (CRITICAL)
+This project uses **Ollama** to run the medical LLM locally. You must install it and pull the specific model before running the backend.
+
+1.  **Download Ollama:**
+    * Go to [ollama.com](https://ollama.com) and download the installer for your OS (Windows/Mac/Linux).
+    * Install Ollama.
+
+2.  **Start the Ollama Server:**
+    * Open a terminal and type:
+      ```sh
+      ollama serve
+      ```
+    * *Keep this terminal window open in the background.*
+
+3.  **Download the Medical Model:**
+    * Open a **new** terminal window and run the exact command below to pull the required 4-billion parameter medical model:
+      ```sh
+      ollama pull MedAIBase/MedGemma1.5:4b
+      ```
+    * *Note: This download is approximately 2.6 GB.*
+
 ---
 
-## Development Setup
+##  Development Setup (Run Instructions)
+
+To run the full application, you will need **two separate terminal windows** open simultaneously: one for the Backend (Python) and one for the Frontend (Node.js).
+
+### Terminal 1: Backend Server
 
 ```sh
-# Clone the repository
+# 1. Clone the repository (if not already done)
 git clone <YOUR_GIT_URL>
-
-# Navigate into the project directory
 cd <YOUR_PROJECT_NAME>
 
-# Navigate to backend folder
+# 2. Navigate to backend folder
 cd backend
 
-# Create conda environment
+# 3. Create conda environment
 conda create --name xmedfusion_env python=3.10
+conda activate xmedfusion_env
 
-# Install dependencies
+# 4. Install dependencies
+# (Ensure you have PyTorch with CUDA support if you have an NVIDIA GPU)
 pip install -r requirements.txt
 
+# 5. Start the Backend API
+python app.py
+```
 
+
+You should see "Application startup complete" and "All AI Agents Ready"
+
+### Terminal 2: Frontend Setup
+
+```sh
 # Navigate to frontend folder
 cd frontend
 

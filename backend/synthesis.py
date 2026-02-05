@@ -4,21 +4,24 @@ import os
 import re
 import json
 import time
+import asyncio  # <--- REQUIRED FOR PARALLELISM
 from pathlib import Path
 from langchain_community.chat_models import ChatOllama
 
-# NEW: validator (create validators.py as shown below, or paste it into this file)
-from backend.validators import validate_report
+# NEW: validator (ensure validators.py exists)
+from validators import validate_report
+import config  # <--- GLOBAL CONFIG
 
 # Import from draft.py
 from draft import (
     RetrievalAgent,
     LocalLLMReportAgent,
     reports_dict,
-    model,
-    preprocess,
+    model as clip_model,      # Explicitly import CLIP model
+    preprocess as clip_prep,  # Explicitly import CLIP preprocess
     device,
     truncate_report,
+    zero_shot_classify        # <--- CRITICAL NEW IMPORT
 )
 
 # Import from vision.py
@@ -69,10 +72,14 @@ def format_kg_for_prompt(kg_data):
 # Local Synthesis Agent
 # -------------------------------
 class LocalSynthesisAgent:
-    def __init__(self, model_name="deepseek-r1:1.5b"):
+    def __init__(self, model_name=config.OLLAMA_MODEL): 
         if model_name.startswith("ollama/"):
             model_name = model_name.split("/", 1)[1]
-        self.llm = ChatOllama(model=model_name, temperature=0.1)
+        
+        self.llm = ChatOllama(
+            model=model_name, 
+            temperature=config.TEMPERATURE
+        )
 
     def repair_report(self, bad_report: str, errors: list[str], kg_text_block: str) -> str:
         err_txt = "\n".join([f"- {e}" for e in errors])
@@ -104,15 +111,22 @@ Here is the report to fix:
 Return ONLY the corrected report.
 """
         resp = self.llm.invoke(prompt)
-        text = resp.content if hasattr(resp, "content") else str(resp)
-        text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
-        # strip accidental code fences if any
-        text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE).strip()
-        text = re.sub(r"\s*```$", "", text).strip()
-        return text
+        content = resp.content if hasattr(resp, "content") else str(resp)
+        
+        # Standard cleanup for repair output
+        content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+        content = re.sub(r"^```(?:json)?\s*", "", content, flags=re.IGNORECASE).strip()
+        content = re.sub(r"\s*```$", "", content).strip()
+        
+        # Post-repair headers fix
+        headers = ["FINDINGS", "IMPRESSION", "LABELS", "RECOMMENDATIONS"]
+        for h in headers:
+            content = re.sub(f"({h})[: ]*(?=[A-Z])", f"{h}:\n", content, flags=re.IGNORECASE)
+            
+        return content
 
-    # CHANGED: Generator (yields status)
-    def generate_final_report(
+    # CHANGED: ASYNC Generator for Parallel Execution
+    async def generate_final_report(
         self,
         draft_agent,
         vision_agent,
@@ -120,105 +134,141 @@ Return ONLY the corrected report.
         reports_dict,
         image_paths,
     ):
-        print(f"\n🚀 Starting Synthesis Pipeline for {len(image_paths)} image(s)...")
+        print(f"\n🚀 Starting PARALLEL Synthesis Pipeline for {len(image_paths)} image(s)...")
         target_image = image_paths[0]
 
-        # 1️⃣ Vision Agent
-        print("\n👁️  Running Vision Agent...")
-        yield json.dumps({"status": "vision_start", "message": "Analyzing visual features..."}) + "\n"
+        # Yield initial status
+        yield json.dumps({"status": "parallel_start", "message": "Running Vision, Draft, and KG agents in parallel..."}) + "\n"
 
-        img_embed = get_visual_embeddings(image_paths, vision_model, proj_heads)
-        if img_embed is not None:
-            vision_features = embeddings_to_text(img_embed)
-            vision_report = vision_agent.generate_report(vision_features)
-        else:
-            vision_report = "No visual features could be extracted."
+        # --- DEFINE ASYNC TASKS ---
 
-        print(f"✅ Vision Report Generated ({len(vision_report)} chars)")
-        yield json.dumps({"status": "vision_done"}) + "\n"
+        # Task 1: Vision (Zero-Shot)
+        async def run_vision():
+            return await asyncio.to_thread(
+                zero_shot_classify, target_image, clip_model, clip_prep, device
+            )
 
-        # 2️⃣ Draft Agent
-        print("\n📚 Running Draft Agent...")
-        yield json.dumps({"status": "draft_start", "message": "Retrieving similar cases..."}) + "\n"
+        # Task 2: Draft (Retrieval + LLM)
+        async def run_draft():
+            # CPU bound retrieval
+            top_reports = await asyncio.to_thread(
+                retrieval_agent.retrieve_top_k, target_image, reports_dict
+            )
+            draft_context = "\n\n".join(truncate_report(r, 75) for r in top_reports)
+            # IO bound generation
+            return await asyncio.to_thread(
+                draft_agent.generate_report, draft_context
+            )
 
-        top_reports = retrieval_agent.retrieve_top_k(target_image, reports_dict)
-        draft_context = "\n\n".join(truncate_report(r, 75) for r in top_reports)
-        draft_report = draft_agent.generate_report(draft_context)
-
-        print(f"✅ Draft Report Generated ({len(draft_report)} chars)")
-        yield json.dumps({"status": "draft_done"}) + "\n"
-
-        # 3️⃣ Knowledge Graph Agent
-        print("\n🕸️  Running Knowledge Graph Agent...")
-        yield json.dumps({"status": "kg_start", "message": "Constructing Knowledge Graph..."}) + "\n"
-
-        kg_text_block = "KG generation skipped."
-        kg_json = None
-
-        if KG_AVAILABLE:
+        # Task 3: Knowledge Graph (API Call)
+        async def run_kg():
+            if not KG_AVAILABLE:
+                return None, "KG generation skipped."
+            
+            kg_text = "KG generation skipped."
+            kg_data = None
+            
+            # Simple retry logic inside the thread wrapper
             max_retries = 3
             for attempt in range(max_retries):
                 try:
-                    kg_json = infer_kg(target_image, projection="Frontal", thinking_budget=0)
-                    kg_text_block = format_kg_for_prompt(kg_json)
-                    print("✅ Knowledge Graph Extracted successfully")
+                    kg_data = await asyncio.to_thread(
+                        infer_kg, target_image, projection="Frontal", thinking_budget=0
+                    )
+                    kg_text = format_kg_for_prompt(kg_data)
                     break
                 except Exception as e:
                     if "503" in str(e) or "overloaded" in str(e).lower():
                         if attempt < max_retries - 1:
-                            wait_time = (attempt + 1) * 2
-                            print(f"⚠️ Model overloaded. Retrying in {wait_time}s...")
-                            time.sleep(wait_time)
+                            await asyncio.sleep((attempt + 1) * 2)
                         else:
-                            kg_text_block = "Error: Knowledge Graph unavailable (Server Overloaded)."
+                            kg_text = "Error: KG Server Overloaded."
                     else:
-                        print(f"❌ Error generating KG: {e}")
-                        kg_text_block = "Error generating Knowledge Graph."
+                        print(f"KG Error: {e}")
+                        kg_text = "Error generating Knowledge Graph."
                         break
+            return kg_data, kg_text
 
-        yield json.dumps({"status": "kg_done"}) + "\n"
+        # --- EXECUTE PARALLEL GATHER ---
+        # This runs all 3 agents simultaneously 
+        vision_report, draft_report, (kg_json, kg_text_block) = await asyncio.gather(
+            run_vision(),
+            run_draft(),
+            run_kg()
+        )
 
-        # 4️⃣ Synthesis (Final Combined Report)
+        # Notify completion of parallel phase
+        print(f"✅ Vision Detected: {vision_report}")
+        print(f"✅ Draft Generated: {len(draft_report)} chars")
+        if kg_json: print("✅ KG Extracted")
+        
+        yield json.dumps({"status": "parallel_done", "message": "Agents finished. Synthesizing..."}) + "\n"
+
+        # ---------------------------------------------------------
+        # 4️⃣ Synthesis (Final Combined Report - Sequential Phase)
+        # ---------------------------------------------------------
         print("\n📝 GENERATING FINAL COMBINED REPORT...")
         yield json.dumps({"status": "synthesis_start", "message": "Synthesizing final report..."}) + "\n"
 
+  # ReAct-Style Prompt (Updated for MedGemma / IU X-Ray Style)
         synthesis_prompt = f"""
 You are an expert thoracic radiologist. Write a final radiology report.
 
-### INPUT DATA SOURCES (Use these to form your report):
-1. **KNOWLEDGE GRAPH (FACTS)**: {kg_text_block}
-- STRICT RULE: If KG says "ABSENT", the finding is NOT present. If "PRESENT", it IS present.
-- WARNING: "Normal cardiomegaly" is impossible. If Normal -> "Heart size is normal". If Cardiomegaly -> "Heart size is enlarged".
+### INPUT DATA:
+1. **KNOWLEDGE GRAPH (FACTS)**: 
+{kg_text_block}
+(Strictly obey these findings. If ABSENT, you must rule it out.)
 
-2. **DRAFT REPORT (STYLE)**: {draft_report}
-3. **VISION REPORT (VISUALS)**: {vision_report}
-- DO NOT talk about angles, lines and dimensions that come from vision report.
-  You can only talk about actual medical findings.
+2. **VISION AI ANALYSIS**: 
+{vision_report}
+(These are probabilities. Only mention if high probability or consistent with KG.)
+
+3. **REFERENCE CASES**: 
+{draft_report}
+(Use this purely for writing style and sentence structure.)
+
+### CONFLICT RESOLUTION:
+- If KG says "Normal" but Vision says "Cardiomegaly", TRUST KG.
+- If Vision says "Edema" but KG says "ABSENT: Edema", TRUST KG.
+
+### STYLE GUIDELINES (CRITICAL):
+- **Systematic Approach:** You MUST write at least one sentence for EACH of these regions:
+  1. **Heart & Mediastinum:** (e.g., "The cardiac silhouette is within normal limits.")
+  2. **Lungs:** (e.g., "No focal consolidation or edema.")
+  3. **Pleura:** (e.g., "No pleural effusion or pneumothorax.")
+  4. **Bones:** (e.g., "No acute bony abnormality.")
+- **Pertinent Negatives:** Do not just say "Normal." Explicitly state what is NOT there (e.g., "There is no pneumothorax").
+- **Narrative Flow:** Combine these into a smooth paragraph. Do not use bullet points.
+
+### EXAMPLES OF DESIRED OUTPUT (MIMIC THIS EXACTLY):
+Example 1:
+"The cardiac silhouette and mediastinum size are within normal limits. There is no pulmonary edema or focal consolidation. No pleural effusion or pneumothorax is seen. The osseous structures are unremarkable."
+
+Example 2:
+"The heart size is normal. The mediastinal contour is within normal limits. The lungs are clear without focal consolidation or effusion. There is no evidence of pneumothorax."
 
 ### OUTPUT INSTRUCTIONS:
-- You must output ONLY the four sections below.
-- DO NOT output "Source 1", "Vision Report", "Analysis", or "Overview".
-- DO NOT include any introductory text like "Here is the report".
-- Make sure all the facts from the KNOWLEDGE GRAPH are accurately presented.
-- Ensure that all input sources have been considered.
+- Generate the report based on the INPUT DATA but using the SYSTEMATIC APPROACH above.
+- Ensure "Labels" are just a comma-separated list.
 
-### REQUIRED FINAL OUTPUT FORMAT:
+### REQUIRED OUTPUT FORMAT:
 
 FINDINGS:
-[Write a continuous narrative paragraph here. Describe lungs, heart, pleura, and bones clearly. Do NOT use bullet points.]
+[Write the systematic narrative here.]
 
 IMPRESSION:
-[1-2 sentence summary of the diagnosis.]
+[1 sentence summary, e.g., "No acute cardiopulmonary process."]
 
 LABELS:
-[Comma-separated list of conditions found, e.g., Cardiomegaly, Pleural Effusion, Normal.]
+[Comma-separated list e.g. Cardiomegaly, Normal, etc.]
 
 RECOMMENDATIONS:
-[One sentence recommendation. If normal, write "None". If abnormal, suggest "Clinical correlation recommended" or "Follow-up CT", or a relevant suggestion.]
+[One sentence or "None".]
 """
 
         full_response = ""
-        for chunk in self.llm.stream(synthesis_prompt):
+        # Stream the LLM response
+        async for chunk in self.llm.astream(synthesis_prompt):
             content = getattr(chunk, "content", None)
             if content:
                 print(content, end="", flush=True)
@@ -226,14 +276,41 @@ RECOMMENDATIONS:
 
         print("\n" + "=" * 60)
 
-        # CLEANUP
+        # === IMPROVED CLEANUP BLOCK ===
+        
+        # 1. Remove <think> tags
         final_report = re.sub(r"<think>.*?</think>", "", full_response, flags=re.DOTALL).strip()
-        # remove accidental leading ``` blocks
+        
+        # 2. Fix standard formatting
         final_report = re.sub(r"^```(?:json)?\s*", "", final_report, flags=re.IGNORECASE).strip()
         final_report = re.sub(r"\s*```$", "", final_report).strip()
 
-        # 5️⃣ AGENTIC LOOP: Validate -> Repair -> Re-validate
-        MAX_ITERS = 2  # keep small for latency / streaming demo
+        # 3. Force Newlines BEFORE Headers 
+        # (Fixes "Thoracic RECOMMENDATIONS" -> "Thoracic\nRECOMMENDATIONS")
+        headers = ["FINDINGS", "IMPRESSION", "LABELS", "RECOMMENDATIONS"]
+        for h in headers:
+            # Look for header (case insensitive) preceded by a word character
+            final_report = re.sub(r"(?<=\w)[ \t]*(" + h + r":?)", r"\n\n\1", final_report, flags=re.IGNORECASE)
+
+        # 4. Force Newlines AFTER Headers
+        # (Fixes "LabelsScoliosis" -> "Labels:\nScoliosis")
+        for h in headers:
+            final_report = re.sub(f"({h})[: ]*(?=[A-Z])", f"{h}:\n", final_report, flags=re.IGNORECASE)
+
+        # 5. Fix Specific Typos
+        final_report = final_report.replace("Espaça", "Airspace")
+        final_report = final_report.replace("Espaco", "Airspace")
+        
+        # 6. Fix "Normal Cardiomegaly" Contradiction
+        if "Normal" in final_report and "Cardiomegaly" in final_report:
+            if "Cardiomegaly" not in kg_text_block: 
+                 final_report = final_report.replace("Cardiomegaly", "")
+
+        # 7. Final Trim
+        final_report = final_report.strip()
+
+        # AGENTIC LOOP: Validate -> Repair -> Re-validate
+        MAX_ITERS = 3
 
         for it in range(MAX_ITERS + 1):
             yield json.dumps({"status": "validate_start", "iter": it}) + "\n"
@@ -249,7 +326,8 @@ RECOMMENDATIONS:
                 break
 
             yield json.dumps({"status": "repair_start", "iter": it}) + "\n"
-            final_report = self.repair_report(final_report, v["errors"], kg_text_block)
+            # Note: repair_report is synchronous, wrap it if strictly needed, but it's fast enough usually
+            final_report = await asyncio.to_thread(self.repair_report, final_report, v["errors"], kg_text_block)
             yield json.dumps({"status": "repair_done", "iter": it}) + "\n"
 
         # 6️⃣ COMPLETE
@@ -259,63 +337,70 @@ RECOMMENDATIONS:
 
 
 # -------------------------------
-# Example Usage
+# Example Usage (Test Block)
 # -------------------------------
 if __name__ == "__main__":
-    print(f"Using device: {device}")
+    # Helper for running async main in script
+    async def main_test():
+        print(f"Using device: {device}")
+        print(f"Global Model: {config.OLLAMA_MODEL}")
 
-    target_image = "data/iu_xray/images/CXR3655_IM-1817/0.png"
+        target_image = "data/iu_xray/images/CXR3655_IM-1817/0.png"
+        
+        # (Image search logic omitted for brevity, assuming path exists for test)
+        if not os.path.exists(target_image):
+             # minimal fallback check
+             if os.path.exists("data/iu_xray/images"):
+                for root, _, files in os.walk("data/iu_xray/images"):
+                    for f in files:
+                        if f.endswith(".png"):
+                            target_image = os.path.join(root, f)
+                            break
+                    if target_image: break
 
-    if not os.path.exists(target_image):
-        if os.path.exists("data/iu_xray/images"):
-            found = None
-            for root, _, files in os.walk("data/iu_xray/images"):
-                for f in files:
-                    if f.endswith(".png"):
-                        found = os.path.join(root, f)
-                        break
-                if found:
-                    break
-            if found:
-                target_image = found
+        if os.path.exists(target_image):
+            image_paths = [target_image]
 
-    if os.path.exists(target_image):
-        image_paths = [target_image]
+            # Initialize Agents (Using Global Config Defaults)
+            retrieval_agent = RetrievalAgent(clip_model, clip_prep, k=5, device=device)
+            draft_agent = LocalLLMReportAgent()     # Uses config.OLLAMA_MODEL
+            vision_agent = VisionLLMAgent()         # Uses config.OLLAMA_MODEL
+            synthesis_agent = LocalSynthesisAgent() # Uses config.OLLAMA_MODEL
 
-        retrieval_agent = RetrievalAgent(model, preprocess, k=5, device=device)
-        draft_agent = LocalLLMReportAgent(model_name="deepseek-r1:1.5b")
-        vision_agent = VisionLLMAgent(model_name="deepseek-r1:1.5b")
-        synthesis_agent = LocalSynthesisAgent(model_name="deepseek-r1:1.5b")
+            # Run Pipeline
+            gen = synthesis_agent.generate_final_report(
+                draft_agent=draft_agent,
+                vision_agent=vision_agent,
+                retrieval_agent=retrieval_agent,
+                reports_dict=reports_dict,
+                image_paths=image_paths,
+            )
 
-        gen = synthesis_agent.generate_final_report(
-            draft_agent=draft_agent,
-            vision_agent=vision_agent,
-            retrieval_agent=retrieval_agent,
-            reports_dict=reports_dict,
-            image_paths=image_paths,
-        )
+            output_dir = "XMedAgent/out"
+            os.makedirs(output_dir, exist_ok=True)
+            save_path = os.path.join(output_dir, "final_report.txt")
 
-        output_dir = "XMedAgent/out"
-        os.makedirs(output_dir, exist_ok=True)
-        save_path = os.path.join(output_dir, "final_report.txt")
+            final_text = ""
+            
+            # Consume ASYNC Generator
+            async for chunk in gen:
+                try:
+                    data = json.loads(chunk)
+                    if "status" in data:
+                        print(f"[{data['status']}] {data.get('message', '')}")
+                    
+                    if data.get("status") == "complete":
+                        final_text = data.get("final_report", "")
+                        if data.get("knowledge_graph"):
+                            print("✅ Knowledge graph included.")
+                except Exception:
+                    continue
 
-        final_text = ""
-        final_payload = None
-        for chunk in gen:
-            try:
-                data = json.loads(chunk)
-            except Exception:
-                continue
-            if data.get("status") == "complete":
-                final_payload = data
-                final_text = data.get("final_report", "")
-                break
+            with open(save_path, "w", encoding="utf-8") as f:
+                f.write(final_text)
+            print(f"\n📄 Final report saved to: {save_path}")
+        else:
+            print("❌ Error: No valid image found.")
 
-        with open(save_path, "w", encoding="utf-8") as f:
-            f.write(final_text)
-
-        print(f"\n📄 Final report saved to: {save_path}")
-        if final_payload and final_payload.get("knowledge_graph") is not None:
-            print("✅ Knowledge graph included in final payload.")
-    else:
-        print("❌ Error: No valid image found.")
+    # Execute Async Main
+    asyncio.run(main_test())
