@@ -2,22 +2,24 @@ import os
 import json
 import pandas as pd
 import re
-import torch
-from tqdm import tqdm
+import asyncio
+import numpy as np
+from tqdm.asyncio import tqdm
 from pycocoevalcap.bleu.bleu import Bleu
 from pycocoevalcap.meteor.meteor import Meteor
 from pycocoevalcap.rouge.rouge import Rouge
 from pycocoevalcap.cider.cider import Cider
 
 # Import Agents & Config
+import config
 from synthesis import (
     LocalSynthesisAgent,
     RetrievalAgent,
     LocalLLMReportAgent,
     VisionLLMAgent,
     reports_dict,
-    model,
-    preprocess,
+    clip_model,
+    clip_prep,
     device
 )
 
@@ -26,22 +28,18 @@ from synthesis import (
 # ------------------------------------------------------------------
 ANNOTATIONS_PATH = "data/iu_xray/annotation.json" 
 IMAGES_ROOT = "data/iu_xray/images"
-OUTPUT_FILE = "test_generations_formatted.json"
-SCORES_FILE = "test_scores_formatted.csv"
-LIMIT = 3
+OUTPUT_FILE = "test_generations_judge.json"
+SCORES_FILE = "test_scores_judge.csv"
+LIMIT = 5  # Small limit to test without waiting too long
 
 # ------------------------------------------------------------------
-# FORMATTER AGENT (New Addition)
+# FORMATTER AGENT (Style Matcher)
 # ------------------------------------------------------------------
 class ReportFormatter:
     def __init__(self, llm_agent):
         self.llm = llm_agent
 
     def format_to_ground_truth_style(self, raw_report):
-        """
-        Takes the detailed agent output and rewrites it as a single 
-        narrative paragraph to match IU X-Ray ground truth style.
-        """
         prompt = f"""
 You are a medical data cleaner. Rewrite the following radiology report content into a SINGLE continuous paragraph.
 - Remove all headers (FINDINGS, IMPRESSION, etc.).
@@ -50,25 +48,55 @@ You are a medical data cleaner. Rewrite the following radiology report content i
 - Make it flow naturally like a story.
 - Keep it concise.
 
-Here are examples of the target style:
-1. "The heart size and pulmonary vascularity appear within normal limits. A large hiatal hernia is noted. The lungs are free of focal airspace disease."
-2. "Cardiac and mediastinal contours are within normal limits. The lungs are clear. Bony structures are intact."
-
-RAW REPORT TO REWRITE:
+RAW REPORT:
 {raw_report}
 
 REWRITTEN PARAGRAPH ONLY:
 """
-        # Using the existing LLM agent to invoke this simple task
         response = self.llm.llm.invoke(prompt)
         content = response.content if hasattr(response, "content") else str(response)
-        
-        # Clean thinking tokens if using DeepSeek
         content = re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL).strip()
         return content
 
 # ------------------------------------------------------------------
-# SCORER CLASS
+# LLM-AS-A-JUDGE (Medical Accuracy Scorer)
+# ------------------------------------------------------------------
+class LLMJudge:
+    def __init__(self, llm_agent):
+        self.llm = llm_agent
+
+    def evaluate_medical_accuracy(self, reference, hypothesis):
+        """
+        Asks the LLM to score the medical accuracy between 1-5.
+        Inspired by RadGraph/RadCheck methodologies.
+        """
+        prompt = f"""
+You are a senior radiologist auditing AI reports. 
+Compare the Ground Truth report to the AI Generated report.
+
+Ground Truth: "{reference}"
+AI Generated: "{hypothesis}"
+
+Task: Rate the AI report's MEDICAL ACCURACY on a scale of 1 to 5.
+1: Completely wrong / hallucinated findings.
+2: Missed major findings or added major false positives.
+3: Captured some findings but missed others or minor errors.
+4: Medically accurate but minor style/phrasing differences.
+5: Perfect medical equivalent (findings match exactly).
+
+Output ONLY the number (1-5).
+"""
+        try:
+            response = self.llm.llm.invoke(prompt)
+            content = response.content if hasattr(response, "content") else str(response)
+            # Extract the first digit found
+            score = re.search(r'\d', content)
+            return int(score.group()) if score else 3
+        except:
+            return 3 # Default to average if parsing fails
+
+# ------------------------------------------------------------------
+# SCORER CLASS (NLP Metrics)
 # ------------------------------------------------------------------
 class MedicalReportEvaluator:
     def __init__(self):
@@ -89,8 +117,7 @@ class MedicalReportEvaluator:
                         score_results[m] = s
                 else:
                     score_results[method] = score
-            except Exception as e:
-                # print(f"⚠️ Error in {method}: {e}")
+            except Exception:
                 if isinstance(method, list):
                     for m in method: score_results[m] = 0.0
                 else:
@@ -98,9 +125,9 @@ class MedicalReportEvaluator:
         return score_results
 
 # ------------------------------------------------------------------
-# MAIN EVALUATION LOOP
+# MAIN EVALUATION LOOP (Async)
 # ------------------------------------------------------------------
-def run_evaluation():
+async def run_evaluation():
     print(f"📂 Loading annotations from {ANNOTATIONS_PATH}...")
     
     with open(ANNOTATIONS_PATH, 'r') as f:
@@ -133,24 +160,28 @@ def run_evaluation():
     test_image_paths = test_image_paths[:LIMIT]
     test_reports = test_reports[:LIMIT]
 
-    # Initialize Agents
-    print("🤖 Initializing Agents...")
-    retrieval_agent = RetrievalAgent(model, preprocess, k=5, device=device)
-    draft_agent = LocalLLMReportAgent(model_name="ollama/deepseek-r1:1.5b")
-    vision_agent = VisionLLMAgent(model_name="ollama/deepseek-r1:1.5b")
-    synthesis_agent = LocalSynthesisAgent(model_name="ollama/deepseek-r1:1.5b")
+    # Initialize Agents (Using Global Config)
+    print(f"🤖 Initializing Agents ({config.OLLAMA_MODEL})...")
     
-    # NEW: Initialize Formatter
+    retrieval_agent = RetrievalAgent(clip_model, clip_prep, k=5, device=device)
+    draft_agent = LocalLLMReportAgent()     # Defaults to config model
+    vision_agent = VisionLLMAgent()         # Defaults to config model
+    synthesis_agent = LocalSynthesisAgent() # Defaults to config model
+    
+    # Initialize Evaluators
     formatter = ReportFormatter(draft_agent) 
+    judge = LLMJudge(draft_agent) # Use the same LLM to judge
 
     references = {}
     hypotheses = {}
     results_log = []
+    judge_scores = []
 
     print("\n" + "="*60)
-    print("🚀 VISUAL COMPARISON (With Formatting Step)")
+    print("🚀 STARTING ASYNC EVALUATION")
     print("="*60)
 
+    # Use tqdm async for progress bar
     for idx, (img_path, ground_truth) in enumerate(tqdm(zip(test_image_paths, test_reports), total=len(test_image_paths))):
         sample_id = str(idx)
 
@@ -161,7 +192,11 @@ def run_evaluation():
                 continue
 
         try:
-            # 1. GENERATE RAW OUTPUT (Structured with headers)
+            # 1. RUN PIPELINE (Async Generator)
+            # We consume the generator to get the final output
+            raw_text = ""
+            kg_data = None
+            
             gen = synthesis_agent.generate_final_report(
                 draft_agent=draft_agent,
                 vision_agent=vision_agent,
@@ -170,30 +205,25 @@ def run_evaluation():
                 image_paths=[img_path] 
             )
 
-            raw_text = ""
-            for chunk in gen:
+            async for chunk in gen:
                 try:
                     chunk_data = json.loads(chunk)
                     if chunk_data.get("status") == "complete":
                         raw_text = chunk_data.get("final_report", "")
+                        kg_data = chunk_data.get("knowledge_graph")
                 except: pass
             
-            # 2. FORMATTING STEP (New LLM Call)
-            # Transforms the raw output into a single GT-style paragraph
-            formatted_hyp = formatter.format_to_ground_truth_style(raw_text)
+            # 2. FORMATTING STEP (Sync)
+            formatted_hyp = await asyncio.to_thread(formatter.format_to_ground_truth_style, raw_text)
             
-            # 3. NORMALIZE (Lowercase, remove extra spaces for metric calc)
+            # 3. NORMALIZE
             clean_ref = ground_truth.replace('\n', ' ').strip().lower()
             clean_hyp = formatted_hyp.replace('\n', ' ').strip().lower()
-            
-            # Safety check
             if not clean_hyp: clean_hyp = "no report generated"
 
-            # 4. DEBUG PRINT
-            print(f"\n[Sample {idx}]")
-            print(f"📸 Image: {os.path.basename(img_path)}")
-            print(f"📘 REF: {clean_ref[:80]}...") 
-            print(f"📙 HYP: {clean_hyp[:80]}...") 
+            # 4. LLM JUDGE SCORE (Sync)
+            medical_score = await asyncio.to_thread(judge.evaluate_medical_accuracy, clean_ref, clean_hyp)
+            judge_scores.append(medical_score)
 
             # 5. STORE
             references[sample_id] = [clean_ref]
@@ -204,16 +234,20 @@ def run_evaluation():
                 "image": img_path,
                 "raw_generated": raw_text,
                 "final_formatted": clean_hyp,
-                "ground_truth": clean_ref
+                "ground_truth": clean_ref,
+                "judge_score": medical_score
             })
 
+            # Live Print
+            print(f"\n[Img {idx}] Judge Score: {medical_score}/5 | BLEU-4 will be calc at end.")
+
         except Exception as e:
-            print(f"Error: {e}")
+            print(f"Error processing {idx}: {e}")
             continue
 
-    # 5. COMPUTE SCORES
+    # 6. COMPUTE NLP SCORES
     print("\n" + "="*60)
-    print("📊 CALCULATING METRICS")
+    print("📊 CALCULATING AGGREGATE METRICS")
     print("="*60)
     
     if not references:
@@ -223,14 +257,25 @@ def run_evaluation():
     evaluator = MedicalReportEvaluator()
     scores = evaluator.compute_scores(references, hypotheses)
 
+    # Add Judge Score Average
+    avg_judge = np.mean(judge_scores) if judge_scores else 0
+    scores["LLM_Judge_Avg"] = avg_judge
+
+    # Print Final Table
+    print(f"{'METRIC':<15} {'SCORE':<10}")
+    print("-" * 25)
     for metric, score in scores.items():
-        print(f"{metric:<10}: {score:.4f}")
+        print(f"{metric:<15}: {score:.4f}")
 
     # Save
     with open(OUTPUT_FILE, 'w') as f:
         json.dump(results_log, f, indent=2)
-    pd.DataFrame([scores]).to_csv(SCORES_FILE, index=False)
+    
+    # Save scores including the new judge metric
+    df_scores = pd.DataFrame([scores])
+    df_scores.to_csv(SCORES_FILE, index=False)
+    
     print(f"\n✅ Done. Full log saved to {OUTPUT_FILE}")
 
 if __name__ == "__main__":
-    run_evaluation()
+    asyncio.run(run_evaluation())
