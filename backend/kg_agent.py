@@ -1,248 +1,355 @@
-'''
-python kg_agent.py --image "data/iu_xray/images/CXR1_1_IM-0001/1.png" --projection "Frontal" --out "out/outkg.json"
-'''
-
-# kg_agent.py
 from __future__ import annotations
 
 import os
-import sys
 import json
 import re
+import sys
+import gc
+import time
 from pathlib import Path
-from string import Template
-from typing import List, Tuple, Literal, Optional, Union
-
-from dotenv import load_dotenv
-from pydantic import BaseModel
-
-from google import genai
-from google.genai import types
-
+from typing import List, Tuple, Literal, Optional, Union, Dict
+from PIL import Image
 import torch
-
-if torch.cuda.is_available():
-    device = torch.device("cuda")
-elif torch.backends.mps.is_available():
-    device = torch.device("mps")
-else:
-    device = torch.device("cpu")
-
-print(f"Using device: {device}")
-
-
-# Load backend/.env (same folder as this script)
-load_dotenv(dotenv_path=Path(__file__).with_name(".env"))
+import torch.nn as nn
+import torch.nn.functional as F
+from transformers import AutoTokenizer
+import open_clip
+import config
 
 # -------------------------
-# Prompt (same behavior as your current file)
+# CONFIGURATION
 # -------------------------
-PROMPT_TMPL = Template(r"""You are an expert radiologist.
+TRAINED_HEAD_PATH = "model_weights/KG_Agent/biomed_clip/biomed_clip_head_best.pth"
 
-You MUST output a RadGraph-style KG that matches this token-level convention.
-
-OUTPUT JSON ONLY:
-{"entities": [[TEXT, LABEL], ...], "relations": [[HEAD_IDX, TAIL_IDX, TYPE], ...]}
-
-HARD CONSTRAINTS (do not violate):
-- TEXT must be short token-like spans (usually 1 word).
-- Do NOT output long phrases: "no evidence of ...", "acute cardiopulmonary abnormality", etc.
-- Do NOT output general extra anatomy (bones, soft tissues, diaphragm, gastric bubble, etc.)
-  unless it is one of the core RadGraph tokens you chose.
-- Prefer this core token set when relevant (normal CXR template):
-  cardiac, silhouette, mediastinum, size, pulmonary, edema, pleural, effusion,
-  pneumothorax, Normal, chest, x - XXXX
-- Split combined concepts:
-  "pleural effusion" -> ["pleural", ...] + ["effusion", ...]
-  "pulmonary edema"  -> ["pulmonary", ...] + ["edema", ...]
-- IMPORTANT label convention for this dataset:
-  "size" should be Anatomy::definitely present (not Observation).
-  "x - XXXX" should be Observation::definitely present (not Anatomy).
-
-RELATION TEMPLATES (use these whenever applicable):
-- silhouette -> cardiac : modify
-- size -> mediastinum : modify
-- edema -> pulmonary : located_at
-- effusion -> pleural : located_at
-- Normal -> x - XXXX : modify
-- x - XXXX -> chest : located_at
-
-ALLOWED LABELS:
-- Anatomy::definitely present/absent/uncertain
-- Observation::definitely present/absent/uncertain
-ALLOWED RELATIONS:
-- modify, located_at, suggestive_of
-
-PROJECTION: $projection
-Return ONLY the JSON object, complete and valid.
-""")
-
-
-# -------------------------
-# Schema forced output
-# -------------------------
-Label = Literal[
-    "Anatomy::definitely present",
-    "Anatomy::definitely absent",
-    "Anatomy::uncertain",
-    "Observation::definitely present",
-    "Observation::definitely absent",
-    "Observation::uncertain",
+DISEASES = [
+    "Cardiomegaly", "Pleural Effusion", "Edema", "Pneumothorax", 
+    "Infiltrate", "Consolidation", "Lung Opacity", "Nodule", 
+    "Atelectasis", "Fracture"
 ]
-RelType = Literal["modify", "located_at", "suggestive_of"]
 
-Entity = Tuple[str, Label]
-Relation = Tuple[int, int, RelType]
+PATHOLOGY_CONFIG = {
+    "Cardiomegaly":     {"pos": "enlarged heart cardiomegaly", "neg": "normal heart size"},
+    "Pleural Effusion": {"pos": "pleural effusion fluid",      "neg": "no pleural effusion"},
+    "Edema":            {"pos": "pulmonary edema",             "neg": "no pulmonary edema"},
+    "Pneumothorax":     {"pos": "pneumothorax air",            "neg": "no pneumothorax"},
+    "Infiltrate":       {"pos": "lung infiltrate pneumonia",   "neg": "no infiltrates"},
+    "Consolidation":    {"pos": "lung consolidation",          "neg": "no consolidation"},
+    "Lung Opacity":     {"pos": "lung opacity",                "neg": "clear lungs"},
+    "Nodule":           {"pos": "lung nodule mass",            "neg": "no nodules"},
+    "Atelectasis":      {"pos": "lung atelectasis",            "neg": "no atelectasis"},
+    "Fracture":         {"pos": "bone fracture broken rib",    "neg": "normal ribs no fractures intact bones"} 
+}
 
+# -------------------------
+# 1. TRAINED CLASSIFIER ARCHITECTURE
+# -------------------------
+class BioMedCLIPClassifierHead(nn.Module):
+    def __init__(self, num_classes):
+        super().__init__()
+        self.head = nn.Sequential(
+            nn.Linear(512, 512),
+            nn.BatchNorm1d(512),
+            nn.ReLU(),
+            nn.Dropout(0.4),
+            nn.Linear(512, num_classes)
+        )
 
-class KGOut(BaseModel):
-    entities: List[Entity]
-    relations: List[Relation]
+    def forward(self, features):
+        return self.head(features)
 
+# -------------------------
+# 2. HELPER FUNCTIONS
+# -------------------------
+def get_spatial_crops(image: Image.Image) -> Dict[str, Image.Image]:
+    """
+    FIX: Adjusted Left Lung crop start from 0.55 -> 0.62 to exclude heart shadow.
+    """
+    w, h = image.size
+    return {
+        "Right Lung": image.crop((0, 0, int(w * 0.45), h)),
+        "Mediastinum": image.crop((int(w * 0.30), 0, int(w * 0.70), h)),
+        # Start at 0.62 to avoid Heart Shadow confusion
+        "Left Lung": image.crop((int(w * 0.62), 0, w, h)) 
+    }
 
-def infer_mime(image_path: Path) -> str:
-    ext = image_path.suffix.lower()
-    if ext in {".jpg", ".jpeg"}:
-        return "image/jpeg"
-    if ext == ".png":
-        return "image/png"
-    if ext == ".webp":
-        return "image/webp"
-    return "application/octet-stream"
+def get_global_probs(image, model, classifier_head, preprocess, device):
+    if classifier_head is None:
+        return {}
+        
+    img_tensor = preprocess(image).unsqueeze(0).to(device)
+    with torch.no_grad():
+        features = model.encode_image(img_tensor)
+        features = F.normalize(features, dim=-1)
+        logits = classifier_head(features)
+        probs = torch.sigmoid(logits).squeeze()
+        
+    return {disease: probs[idx].item() for idx, disease in enumerate(DISEASES)}
 
+def hybrid_classify_spatial(image_path, model, classifier_head, preprocess, tokenizer, device):
+    try:
+        raw_img = Image.open(image_path).convert("RGB")
+    except Exception as e:
+        return f"Error: {e}"
 
-def filter_valid_relations(obj: dict) -> dict:
-    """Drop relations with out-of-range indices (defensive)."""
-    ents = obj.get("entities", [])
-    rels = obj.get("relations", [])
-    n = len(ents)
-    good = []
-    for h, t, r in rels:
-        if isinstance(h, int) and isinstance(t, int) and 0 <= h < n and 0 <= t < n:
-            good.append([h, t, r])
-    obj["relations"] = good
-    return obj
+    findings_list = []
+    
+    # Global Priors
+    global_probs = get_global_probs(raw_img, model, classifier_head, preprocess, device)
+    
+    # Zero-Shot Embeddings
+    crops = get_spatial_crops(raw_img)
+    disease_embeds = {}
+    with torch.no_grad():
+        norm_tokens = tokenizer(["normal chest x-ray", "abnormal chest x-ray"], padding="max_length", truncation=True, max_length=77, return_tensors="pt")["input_ids"].to(device)
+        norm_embeds = F.normalize(model.encode_text(norm_tokens), dim=-1)
 
+        for d, cfg in PATHOLOGY_CONFIG.items():
+            tokens = tokenizer([f"chest x-ray showing {cfg['pos']}", f"chest x-ray showing {cfg['neg']}"], padding="max_length", truncation=True, max_length=77, return_tensors="pt")["input_ids"].to(device)
+            disease_embeds[d] = F.normalize(model.encode_text(tokens), dim=-1)
 
-def extract_first_json_block(text: str) -> Optional[str]:
-    """Fallback extractor if model ever returns extra wrapper text."""
-    if not text:
-        return None
-    s = text.strip()
-    s = re.sub(r"^```(?:json)?\s*", "", s, flags=re.IGNORECASE)
-    s = re.sub(r"\s*```$", "", s)
+    # Scan Zones
+    for zone_name, zone_img in crops.items():
+        img_tensor = preprocess(zone_img).unsqueeze(0).to(device)
+        zone_findings = []
 
-    a = s.find("{")
-    b = s.rfind("}")
-    if a == -1 or b == -1 or b <= a:
-        return None
-    return s[a : b + 1]
+        with torch.no_grad():
+            img_features = F.normalize(model.encode_image(img_tensor), dim=-1)
+            norm_logits = (100.0 * img_features @ norm_embeds.T).softmax(dim=-1).squeeze()
+            prob_zone_normal = norm_logits[0].item()
 
+            for disease, embeds in disease_embeds.items():
+                if zone_name == "Mediastinum" and disease not in ["Cardiomegaly", "Nodule"]: continue
+                if zone_name in ["Right Lung", "Left Lung"] and disease == "Cardiomegaly": continue
 
+                # Zero-Shot & Trained Probs
+                logits = (100.0 * img_features @ embeds.T).softmax(dim=-1).squeeze()
+                zs_prob = logits[0].item()
+                trained_prob = global_probs.get(disease, zs_prob)
+                
+                # --- LOGIC FIX: GLOBAL VETO ---
+                # If the Trained Model is confident the disease is ABSENT (< 0.15),
+                # we suppress it regardless of what the visual scanner says.
+                if trained_prob < 0.15:
+                    continue
+
+                # Hybrid Score
+                final_score = (zs_prob * 0.6) + (trained_prob * 0.4)
+                
+                # --- TUNED THRESHOLDS ---
+                # Lowered from 0.45 to 0.40 to catch mild pathologies (CXR2704)
+                threshold = 0.40
+                
+                # Keep stricter thresholds for "noisy" diseases
+                if disease == "Fracture": threshold = 0.60
+                if disease == "Nodule": threshold = 0.55
+                
+                # Special Logic: If Zero-Shot is VERY confident (>0.85), trust it even if global is lower
+                if zs_prob > 0.85: final_score = max(final_score, 0.6)
+
+                if final_score > threshold and zs_prob > (prob_zone_normal - 0.05):
+                     zone_findings.append(disease)
+
+        if zone_findings:
+            findings_list.append(f"{zone_name}: {', '.join(zone_findings)}")
+        else:
+            findings_list.append(f"{zone_name}: Clear")
+            
+    return "; ".join(findings_list)
+
+# -------------------------
+# 3. GRAPH BUILDER
+# -------------------------
+def parse_findings_to_kg(findings_str: str) -> dict:
+    entities = []
+    relations = []
+    zones = findings_str.split(";")
+    
+    for zone_part in zones:
+        if ":" not in zone_part: continue
+        zone_name, findings_text = zone_part.split(":", 1)
+        zone_name = zone_name.strip().lower()
+        findings_text = findings_text.strip()
+        
+        anat_idx = len(entities)
+        entities.append([zone_name, "Anatomy"])
+        
+        if not findings_text: continue
+        observations = [f.strip().lower() for f in findings_text.split(",")]
+        
+        for obs in observations:
+            obs_idx = len(entities)
+            entities.append([obs, "Observation"])
+            if obs in ["normal", "clear"]:
+                relations.append([obs_idx, anat_idx, "modify"])
+            else:
+                relations.append([obs_idx, anat_idx, "located_at"])
+                
+    return {"entities": entities, "relations": relations}
+
+# -------------------------
+# 4. MAIN INFERENCE
+# -------------------------
 def infer_kg(
     image: Union[str, Path],
     projection: str = "Frontal",
     *,
-    model: str = "gemini-2.5-flash",
-    max_output_tokens: int = 2048,
-    temperature: float = 0.0,
-    api_key: Optional[str] = None,
-    thinking_budget: int = 0,
-    debug: bool = False,
+    clip_model=None, 
+    clip_prep=None,
+    tokenizer=None,
+    classifier_head=None, 
+    device=None,
+    model: str = None, 
+    debug: bool = True,
 ) -> dict:
-    """
-    Run Gemini vision KG extraction and return a Python dict:
-      {"entities": [[text,label], ...], "relations": [[head,tail,type], ...]}
-    """
+    
+    if debug: print("[KG] infer_kg called...", flush=True)
     image_path = Path(image).expanduser()
-    if not image_path.is_absolute():
-        image_path = (Path.cwd() / image_path).resolve()
-    if not image_path.exists():
-        raise FileNotFoundError(f"Image not found: {image_path}")
+    if not image_path.exists(): raise FileNotFoundError(f"Image not found: {image_path}")
+    
+    owns_models = False
 
-    key = api_key or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-    if not key:
-        raise RuntimeError("Missing API key. Put GEMINI_API_KEY in backend/.env or pass api_key=...")
-
-    prompt = PROMPT_TMPL.safe_substitute(projection=projection)
-
-    client = genai.Client(api_key=key)
-
-    mime = infer_mime(image_path)
-    image_part = types.Part.from_bytes(data=image_path.read_bytes(), mime_type=mime)
-
-    resp = client.models.generate_content(
-        model=model,
-        contents=[prompt, image_part],
-        config=types.GenerateContentConfig(
-            temperature=temperature,
-            max_output_tokens=max_output_tokens,
-            thinking_config=types.ThinkingConfig(thinking_budget=thinking_budget),
-            response_mime_type="application/json",
-            response_json_schema=KGOut.model_json_schema(),
-        ),
-    )
-
-    if debug:
-        fr = None
+    # 1. Setup BioMedCLIP
+    if clip_model is None or clip_prep is None or tokenizer is None:
+        owns_models = True
+        if debug: print("[KG] Loading BioMedCLIP...", flush=True)
+        d = "cuda" if torch.cuda.is_available() else "cpu"
+        model_name = "hf-hub:microsoft/BiomedCLIP-PubMedBERT_256-vit_base_patch16_224"
         try:
-            fr = resp.candidates[0].finish_reason
-        except Exception:
-            pass
-        usage = getattr(resp, "usage_metadata", None)
-        print(f"[DEBUG] finish_reason={fr}", file=sys.stderr)
-        if usage is not None:
-            print(f"[DEBUG] usage_metadata={usage}", file=sys.stderr)
+            clip_model, _, clip_prep = open_clip.create_model_and_transforms(model_name, device=d)
+            hf_name = "microsoft/BiomedCLIP-PubMedBERT_256-vit_base_patch16_224"
+            tokenizer = AutoTokenizer.from_pretrained(hf_name, trust_remote_code=True)
+            clip_model.eval()
+        except Exception as e:
+            print(f"[KG] ❌ Error: {e}")
+            return {"entities": [], "relations": []}
+        device = d
 
-    raw_text = getattr(resp, "text", None) or ""
-    # Normally this should already be clean JSON due to response_mime_type + schema
-    try:
-        kg = KGOut.model_validate_json(raw_text).model_dump()
-    except Exception:
-        # fallback extraction if anything weird happens
-        block = extract_first_json_block(raw_text)
-        if not block:
-            raise ValueError(f"Model did not return JSON.\nRaw:\n{raw_text[:1000]}")
-        kg = KGOut.model_validate_json(block).model_dump()
-
-    return filter_valid_relations(kg)
-
-
-def main() -> int:
-    import argparse
-
-    ap = argparse.ArgumentParser(description="Gemini vision → RadGraph-style KG (structured JSON).")
-    ap.add_argument("--image", required=True)
-    ap.add_argument("--projection", default="Frontal")
-    ap.add_argument("--model", default="gemini-2.5-flash")
-    ap.add_argument("--api_key", default=None)
-    ap.add_argument("--max_output_tokens", type=int, default=2048)
-    ap.add_argument("--temperature", type=float, default=0.0)
-    ap.add_argument("--out", default=None, help="Optional .json file path to write pretty JSON.")
-    ap.add_argument("--debug", action="store_true")
-
-    args = ap.parse_args()
-
-    kg = infer_kg(
-        args.image,
-        projection=args.projection,
-        model=args.model,
-        max_output_tokens=args.max_output_tokens,
-        temperature=args.temperature,
-        api_key=args.api_key,
-        thinking_budget=0,
-        debug=args.debug,
+    # 2. Setup Classifier Head
+    if classifier_head is None:
+        if os.path.exists(TRAINED_HEAD_PATH):
+            try:
+                classifier_head = BioMedCLIPClassifierHead(num_classes=len(DISEASES)).to(device)
+                state_dict = torch.load(TRAINED_HEAD_PATH, map_location=device)
+                classifier_head.head.load_state_dict(state_dict)
+                classifier_head.eval()
+            except:
+                classifier_head = None
+    
+    # 3. Extract Findings
+    if debug: print("[KG] Scanning...", flush=True)
+    visual_findings = hybrid_classify_spatial(
+        image_path, clip_model, classifier_head, clip_prep, tokenizer, device
     )
+    if debug: print(f"[KG] Findings: {visual_findings}", flush=True)
 
-    if args.out:
-        out_path = Path(args.out).expanduser()
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_text(json.dumps(kg, ensure_ascii=False, indent=2), encoding="utf-8")
+    # 4. Construct Graph
+    if debug: print("[KG] Constructing Graph...", flush=True)
+    kg = parse_findings_to_kg(visual_findings)
+    
+    # 5. Cleanup
+    if owns_models and device == "cuda":
+        if debug: print("[KG] Cleaning up models...", flush=True)
+        clip_model.to("cpu")
+        if classifier_head: classifier_head.to("cpu")
+        torch.cuda.empty_cache()
+        gc.collect()
 
-    # machine-friendly stdout
-    print(json.dumps(kg, ensure_ascii=False, separators=(",", ":")))
-    return 0
+    if debug: print("[KG] Success.", flush=True)
+    return kg
 
-
+# -------------------------
+# Test Block
+# -------------------------
 if __name__ == "__main__":
-    raise SystemExit(main())
+    print("\n--- Running KG Agent Test Batch ---")
+    
+    ANNO_PATH = "data/iu_xray/annotation.json"
+    IMG_ROOT = "data/iu_xray/images"
+    
+    if not os.path.exists(ANNO_PATH):
+        print(f"❌ Annotation file not found at {ANNO_PATH}")
+        sys.exit(1)
+        
+    with open(ANNO_PATH, 'r') as f:
+        data = json.load(f)
+        
+    test_samples = data.get("test", [])
+    if not test_samples:
+        test_samples = [x for x in data if x.get("split") == "test"]
+    if not test_samples:
+        test_samples = data.get("val", [])
+    
+    # Check top 30
+    samples_to_run = test_samples[:30]
+    
+    # Init Models
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    print(f"Loading Models on {device}...")
+    
+    model_name = "hf-hub:microsoft/BiomedCLIP-PubMedBERT_256-vit_base_patch16_224"
+    clip_model, _, clip_prep = open_clip.create_model_and_transforms(model_name, device=device)
+    hf_name = "microsoft/BiomedCLIP-PubMedBERT_256-vit_base_patch16_224"
+    tokenizer = AutoTokenizer.from_pretrained(hf_name, trust_remote_code=True)
+    clip_model.eval()
+    
+    classifier_head = None
+    if os.path.exists(TRAINED_HEAD_PATH):
+        try:
+            classifier_head = BioMedCLIPClassifierHead(num_classes=len(DISEASES)).to(device)
+            state_dict = torch.load(TRAINED_HEAD_PATH, map_location=device)
+            classifier_head.head.load_state_dict(state_dict)
+            classifier_head.eval()
+            print("✅ Trained Head Loaded.")
+        except:
+            print("⚠️ Could not load trained head.")
+
+    print("-" * 60)
+
+    for i, item in enumerate(samples_to_run):
+        uid = item.get("id", "Unknown")
+        gt_report = item.get("report", "No Report")
+        
+        img_list = item.get("image_path", [])
+        if not img_list: continue
+        img_rel_path = img_list[0] if isinstance(img_list, list) else img_list
+        full_img_path = os.path.join(IMG_ROOT, img_rel_path)
+        
+        if not os.path.exists(full_img_path):
+            continue
+
+        print(f"\n📸 Processing {i+1}/30: {uid}")
+        
+        try:
+            kg_result = infer_kg(
+                full_img_path, 
+                clip_model=clip_model,
+                clip_prep=clip_prep,
+                tokenizer=tokenizer,
+                classifier_head=classifier_head,
+                device=device,
+                debug=False 
+            )
+            
+            print(f"📄 GT Report: {gt_report}")
+            
+            entities = kg_result.get("entities", [])
+            relations = kg_result.get("relations", [])
+            grouped = {}
+            for r in relations:
+                if r[0] >= len(entities) or r[1] >= len(entities): continue
+                if r[2] in ["located_at", "modify"]:
+                    obs = entities[r[0]][0] 
+                    anat = entities[r[1]][0] 
+                    if anat not in grouped: grouped[anat] = []
+                    grouped[anat].append(obs)
+
+            print("🤖 AI Graph Findings:")
+            if not grouped:
+                print("   (No findings detected)")
+            for anat, obs_list in grouped.items():
+                print(f"   • {anat.title()}: {', '.join(obs_list)}")
+            
+        except Exception as e:
+            print(f"❌ Error: {e}")
+
+        print("-" * 60)

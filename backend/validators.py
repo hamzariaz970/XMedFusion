@@ -1,5 +1,6 @@
 import re
 
+
 REQUIRED_SECTIONS = ["FINDINGS", "IMPRESSION", "LABELS", "RECOMMENDATIONS"]
 
 def extract_section(text: str, name: str) -> str:
@@ -8,9 +9,10 @@ def extract_section(text: str, name: str) -> str:
     return (m.group(1).strip() if m else "")
 
 def parse_labels(labels_block: str):
+    if not labels_block: return []
     one_line = " ".join(labels_block.splitlines()).strip()
     parts = [p.strip() for p in one_line.split(",") if p.strip()]
-    return parts if parts else None
+    return parts
 
 def kg_present_absent(kg_json: dict | None):
     present, absent = set(), set()
@@ -29,21 +31,23 @@ def kg_present_absent(kg_json: dict | None):
 def validate_report(report: str, kg_json: dict | None):
     errors = []
 
-    # structure
-    for sec in REQUIRED_SECTIONS:
-        if not re.search(rf"^\s*{sec}:\s*", report, flags=re.MULTILINE):
-            errors.append(f"Missing section: {sec}")
+    # Check if structured
+    is_structured = "FINDINGS:" in report or "IMPRESSION:" in report
 
-    # labels format
-    labels_block = extract_section(report, "LABELS")
-    if parse_labels(labels_block) is None:
-        errors.append("LABELS must be a single comma-separated list (one line).")
+    if is_structured:
+        # structure checks
+        for sec in ["FINDINGS", "IMPRESSION"]:
+            if not re.search(rf"^\s*{sec}:\s*", report, flags=re.MULTILINE):
+                errors.append(f"Missing section: {sec}")
+        
+        findings = extract_section(report, "FINDINGS").lower()
+        impression = extract_section(report, "IMPRESSION").lower()
+        body = findings + " " + impression
+    else:
+        # If unstructured, the whole report is the body
+        body = report.lower()
 
     # KG contradiction heuristic
-    findings = extract_section(report, "FINDINGS").lower()
-    impression = extract_section(report, "IMPRESSION").lower()
-    body = findings + " " + impression
-
     _, absent = kg_present_absent(kg_json)
     for ent in absent:
         if ent in body and not re.search(rf"(no|without|absence of)\s+{re.escape(ent)}", body):

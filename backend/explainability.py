@@ -16,12 +16,10 @@ from vision import vision_model, proj_heads, device, preprocess_image
 class ViTGradCAM:
     def __init__(self, model, target_layer):
         self.model = model
+        self.target_layer = target_layer
         self.gradients = None
         self.activations = None
-        
-        # Register hooks
-        target_layer.register_forward_hook(self.save_activation)
-        target_layer.register_full_backward_hook(self.save_gradient)
+        self.handles = []
 
     def save_activation(self, module, input, output):
         self.activations = output
@@ -29,74 +27,86 @@ class ViTGradCAM:
     def save_gradient(self, module, grad_input, grad_output):
         self.gradients = grad_output[0]
 
+    def _register_hooks(self):
+        # Register hooks and keep handles
+        self.handles.append(self.target_layer.register_forward_hook(self.save_activation))
+        self.handles.append(self.target_layer.register_full_backward_hook(self.save_gradient))
+
+    def _remove_hooks(self):
+        # Remove all hooks
+        for h in self.handles:
+            h.remove()
+        self.handles = []
+
     def __call__(self, x):
-        self.model.eval()
-        
-        # 1. UNFREEZE everything needed for the forward pass
-        # We need both the extractor (timm model) and the projection layers
-        for p in self.model.visual_extractor.parameters():
-            p.requires_grad = True
-        for p in self.model.visual_projection.parameters():
-            p.requires_grad = True
+        self._register_hooks()
+        try:
+            self.model.eval()
             
-        self.model.zero_grad()
-        
-        # 2. MANUAL FORWARD PASS (Bypassing extract_visual_tokens to avoid torch.no_grad)
-        # We replicate the logic from vision.py here:
-        
-        # A. Extract features from the timm backbone
-        # We assume the hook is on a layer inside visual_extractor
-        patch_tokens = self.model.visual_extractor.forward_features(x)
-        
-        # B. Slice to remove CLS token or handle specific output format
-        # ViT usually outputs [Batch, N, Dim]. Index 1: are patches.
-        patch_tokens = patch_tokens[:, 1:, :]
-        
-        # C. Project to embedding dimension
-        output_tokens = self.model.visual_projection(patch_tokens)
-        
-        # 3. Define Target & Backprop
-        # Maximize the sum of activations to find "hot" areas
-        score = output_tokens.sum()
-        score.backward()
-        
-        # 4. Generate CAM
-        gradients = self.gradients
-        activations = self.activations
-        
-        # Safety Check
-        if gradients is None or activations is None:
-            # Re-freeze before crashing
-            for p in self.model.visual_extractor.parameters(): p.requires_grad = False
-            for p in self.model.visual_projection.parameters(): p.requires_grad = False
-            raise RuntimeError("Gradients were not captured. Check if hooks are attached correctly.")
-
-        b, n, d = activations.shape
-        
-        # Handle ViT token slicing (if CLS token exists in activations)
-        # 14x14 = 196 patches. If we have 197, index 0 is CLS.
-        if n == 197:
-            gradients = gradients[:, 1:, :]
-            activations = activations[:, 1:, :]
-        
-        # Weight activations by average gradient
-        weights = gradients.mean(dim=1, keepdim=True)
-        cam = (weights * activations).sum(dim=2)
-
-        # ReLU (Clip negative)
-        cam = cam.clamp(min=0)
-        
-        # Reshape 1D patches back to 2D
-        h = w = int(np.sqrt(cam.shape[1]))
-        cam = cam.reshape(b, h, w)
-        
-        # 5. CLEANUP: Re-freeze the model parameters
-        for p in self.model.visual_extractor.parameters():
-            p.requires_grad = False
-        for p in self.model.visual_projection.parameters():
-            p.requires_grad = False
+            # 1. UNFREEZE everything needed for the forward pass
+            # We need both the extractor (timm model) and the projection layers
+            for p in self.model.visual_extractor.parameters():
+                p.requires_grad = True
+            for p in self.model.visual_projection.parameters():
+                p.requires_grad = True
+                
+            self.model.zero_grad()
             
-        return cam
+            # 2. MANUAL FORWARD PASS (Bypassing extract_visual_tokens to avoid torch.no_grad)
+            # We replicate the logic from vision.py here:
+            
+            # A. Extract features from the timm backbone
+            # We assume the hook is on a layer inside visual_extractor
+            patch_tokens = self.model.visual_extractor.forward_features(x)
+            
+            # B. Slice to remove CLS token or handle specific output format
+            # ViT usually outputs [Batch, N, Dim]. Index 1: are patches.
+            patch_tokens = patch_tokens[:, 1:, :]
+            
+            # C. Project to embedding dimension
+            output_tokens = self.model.visual_projection(patch_tokens)
+            
+            # 3. Define Target & Backprop
+            # Maximize the sum of activations to find "hot" areas
+            score = output_tokens.sum()
+            score.backward()
+            
+            # 4. Generate CAM
+            gradients = self.gradients
+            activations = self.activations
+            
+            # Safety Check
+            if gradients is None or activations is None:
+                raise RuntimeError("Gradients were not captured. Check if hooks are attached correctly.")
+    
+            b, n, d = activations.shape
+            
+            # Handle ViT token slicing (if CLS token exists in activations)
+            # 14x14 = 196 patches. If we have 197, index 0 is CLS.
+            if n == 197:
+                gradients = gradients[:, 1:, :]
+                activations = activations[:, 1:, :]
+            
+            # Weight activations by average gradient
+            weights = gradients.mean(dim=1, keepdim=True)
+            cam = (weights * activations).sum(dim=2)
+    
+            # ReLU (Clip negative)
+            cam = cam.clamp(min=0)
+            
+            # Reshape 1D patches back to 2D
+            h = w = int(np.sqrt(cam.shape[1]))
+            cam = cam.reshape(b, h, w)
+
+            return cam
+
+        finally:
+            # 5. CLEANUP: Re-freeze the model parameters & Remove Hooks
+            for p in self.model.visual_extractor.parameters():
+                p.requires_grad = False
+            for p in self.model.visual_projection.parameters():
+                p.requires_grad = False
+            self._remove_hooks()
 
 # -------------------------------
 # Visualization Utils

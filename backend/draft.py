@@ -111,7 +111,7 @@ def encode_texts(texts):
 # Retrieval Agent
 # -------------------------------
 class RetrievalAgent:
-    def __init__(self, clip_model, preprocess, k=5, device='cuda'):
+    def __init__(self, clip_model, preprocess, k=3, device='cuda'):
         self.model = clip_model
         self.preprocess = preprocess
         self.device = device
@@ -157,15 +157,15 @@ class LocalLLMReportAgent:
 
     def generate_report(self, visual_description):
         prompt = (
-            "You are an expert thoracic radiologist. "
-            "Using the following X-ray image features, generate a formal radiology report "
-            "in narrative style (no bullet points). "
-            "Organize the report into sections:\n"
-            "FINDINGS: Describe abnormalities and normal structures.\n"
-            "IMPRESSION: Summarize diagnostic conclusions.\n"
-            "LABELS: List present conditions as words separated by commas.\n\n"
-            f"Visual Features: {visual_description}\n"
-            "\n=== Start Formal Radiology Report ==="
+            "You are a helpful assistant assisting a radiologist.\n"
+            "Here are snippets from historical X-ray reports that are visibly similar to the current case:\n\n"
+            f"{visual_description}\n\n"
+            "Summarize the COMMON findings and the TYPICAL WRITING STYLE used in these examples.\n"
+            "Do NOT write a full report. Do NOT diagnose the current patient.\n"
+            "Just list:\n"
+            "1. Common pathologies mentioned (if any).\n"
+            "2. Key phrases or stylistic patterns observed.\n"
+            "3. Pertinent negatives (what is typically 'normal' in these cases)."
         )
         
         # Single invocation
