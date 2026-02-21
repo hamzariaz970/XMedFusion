@@ -20,6 +20,8 @@ import config
 # CONFIGURATION
 # -------------------------
 TRAINED_HEAD_PATH = "model_weights/KG_Agent/biomed_clip/biomed_clip_head_best.pth"
+TRAINED_BACKBONE_PATH = "model_weights/KG_Agent/biomed_clip/biomed_clip_backbone_finetuned.pth"
+THRESHOLDS_PATH = "model_weights/KG_Agent/biomed_clip/thresholds.json"
 
 DISEASES = [
     "Cardiomegaly", "Pleural Effusion", "Edema", "Pneumothorax", 
@@ -44,18 +46,44 @@ PATHOLOGY_CONFIG = {
 # 1. TRAINED CLASSIFIER ARCHITECTURE
 # -------------------------
 class BioMedCLIPClassifierHead(nn.Module):
-    def __init__(self, num_classes):
+    """Deeper classifier head with residual connection. Must match training script."""
+    def __init__(self, num_classes, input_dim=512):
         super().__init__()
         self.head = nn.Sequential(
-            nn.Linear(512, 512),
-            nn.BatchNorm1d(512),
-            nn.ReLU(),
-            nn.Dropout(0.4),
-            nn.Linear(512, num_classes)
+            nn.Linear(input_dim, 256),
+            nn.BatchNorm1d(256),
+            nn.GELU(),
+            nn.Dropout(0.3),
+            nn.Linear(256, 128),
+            nn.BatchNorm1d(128),
+            nn.GELU(),
+            nn.Dropout(0.2),
+            nn.Linear(128, num_classes)
         )
+        self.residual = nn.Linear(input_dim, num_classes)
 
     def forward(self, features):
-        return self.head(features)
+        return self.head(features) + self.residual(features)
+
+
+# Load learned thresholds (with hardcoded fallbacks)
+def load_thresholds():
+    if os.path.exists(THRESHOLDS_PATH):
+        try:
+            with open(THRESHOLDS_PATH, 'r') as f:
+                thresholds = json.load(f)
+            print(f"✅ Loaded learned thresholds from {THRESHOLDS_PATH}")
+            return thresholds
+        except:
+            pass
+    # Fallback hardcoded thresholds
+    return {
+        "Cardiomegaly": 0.40, "Pleural Effusion": 0.40, "Edema": 0.40,
+        "Pneumothorax": 0.40, "Infiltrate": 0.40, "Consolidation": 0.40,
+        "Lung Opacity": 0.40, "Nodule": 0.45, "Atelectasis": 0.40, "Fracture": 0.50
+    }
+
+LEARNED_THRESHOLDS = load_thresholds()
 
 # -------------------------
 # 2. HELPER FUNCTIONS
@@ -118,41 +146,63 @@ def hybrid_classify_spatial(image_path, model, classifier_head, preprocess, toke
             prob_zone_normal = norm_logits[0].item()
 
             for disease, embeds in disease_embeds.items():
-                if zone_name == "Mediastinum" and disease not in ["Cardiomegaly", "Nodule"]: continue
-                if zone_name in ["Right Lung", "Left Lung"] and disease == "Cardiomegaly": continue
+                # Skip Cardiomegaly in zone loop — handled globally below
+                if disease == "Cardiomegaly": continue
+                if zone_name == "Mediastinum" and disease not in ["Nodule"]: continue
 
                 # Zero-Shot & Trained Probs
                 logits = (100.0 * img_features @ embeds.T).softmax(dim=-1).squeeze()
                 zs_prob = logits[0].item()
                 trained_prob = global_probs.get(disease, zs_prob)
                 
-                # --- LOGIC FIX: GLOBAL VETO ---
-                # If the Trained Model is confident the disease is ABSENT (< 0.15),
-                # we suppress it regardless of what the visual scanner says.
-                if trained_prob < 0.15:
+                # Pneumothorax: use zero-shot ONLY (only 12 training samples)
+                if disease == "Pneumothorax":
+                    final_score = zs_prob
+                    threshold = 0.55  # Slightly above 0.5 to avoid false positives
+                    if final_score > threshold:
+                        zone_findings.append(disease)
+                    continue
+                
+                # Zone-normal gate: only skip if the zone is strongly normal
+                # and the disease signal is significantly weaker (soft gate)
+                if zs_prob < prob_zone_normal - 0.20:
+                    continue
+                
+                # Global veto: skip if trained model is fairly confident disease is absent
+                if trained_prob < 0.10:
                     continue
 
-                # Hybrid Score
-                final_score = (zs_prob * 0.6) + (trained_prob * 0.4)
+                # Hybrid scoring: equal weight
+                final_score = (zs_prob * 0.5) + (trained_prob * 0.5)
                 
-                # --- TUNED THRESHOLDS ---
-                # Lowered from 0.45 to 0.40 to catch mild pathologies (CXR2704)
-                threshold = 0.40
-                
-                # Keep stricter thresholds for "noisy" diseases
-                if disease == "Fracture": threshold = 0.60
-                if disease == "Nodule": threshold = 0.55
-                
-                # Special Logic: If Zero-Shot is VERY confident (>0.85), trust it even if global is lower
-                if zs_prob > 0.85: final_score = max(final_score, 0.6)
+                # Use learned thresholds
+                threshold = LEARNED_THRESHOLDS.get(disease, 0.40)
 
-                if final_score > threshold and zs_prob > (prob_zone_normal - 0.05):
+                if final_score > threshold:
                      zone_findings.append(disease)
 
         if zone_findings:
             findings_list.append(f"{zone_name}: {', '.join(zone_findings)}")
         else:
             findings_list.append(f"{zone_name}: Clear")
+    
+    # --- GLOBAL SCORE BYPASS for Cardiomegaly ---
+    # Heart size is best judged from the full image, not a zone crop
+    cardio_prob = global_probs.get("Cardiomegaly", 0)
+    cardio_thresh = LEARNED_THRESHOLDS.get("Cardiomegaly", 0.40)
+    if cardio_prob > cardio_thresh:
+        # Inject into Mediastinum zone if it exists, else add as new finding
+        injected = False
+        for i, f in enumerate(findings_list):
+            if "Mediastinum" in f:
+                if "Clear" in f:
+                    findings_list[i] = "Mediastinum: Cardiomegaly"
+                else:
+                    findings_list[i] = f + ", Cardiomegaly"
+                injected = True
+                break
+        if not injected:
+            findings_list.append("Mediastinum: Cardiomegaly")
             
     return "; ".join(findings_list)
 
@@ -230,10 +280,26 @@ def infer_kg(
             try:
                 classifier_head = BioMedCLIPClassifierHead(num_classes=len(DISEASES)).to(device)
                 state_dict = torch.load(TRAINED_HEAD_PATH, map_location=device)
-                classifier_head.head.load_state_dict(state_dict)
+                classifier_head.load_state_dict(state_dict)
                 classifier_head.eval()
-            except:
+            except Exception as e:
+                print(f"[KG] ⚠️ Could not load classifier head: {e}")
                 classifier_head = None
+    
+    # 2b. Load fine-tuned backbone weights if available
+    if os.path.exists(TRAINED_BACKBONE_PATH):
+        try:
+            unfrozen_state = torch.load(TRAINED_BACKBONE_PATH, map_location=device)
+            model_state = clip_model.state_dict()
+            updated = 0
+            for name, value in unfrozen_state.items():
+                if name in model_state:
+                    model_state[name] = value
+                    updated += 1
+            if updated > 0:
+                clip_model.load_state_dict(model_state)
+        except:
+            pass  # Non-critical, just use pretrained backbone
     
     # 3. Extract Findings
     if debug: print("[KG] Scanning...", flush=True)
@@ -297,11 +363,11 @@ if __name__ == "__main__":
         try:
             classifier_head = BioMedCLIPClassifierHead(num_classes=len(DISEASES)).to(device)
             state_dict = torch.load(TRAINED_HEAD_PATH, map_location=device)
-            classifier_head.head.load_state_dict(state_dict)
+            classifier_head.load_state_dict(state_dict)
             classifier_head.eval()
             print("✅ Trained Head Loaded.")
-        except:
-            print("⚠️ Could not load trained head.")
+        except Exception as e:
+            print(f"⚠️ Could not load trained head: {e}")
 
     print("-" * 60)
 

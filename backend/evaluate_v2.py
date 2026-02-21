@@ -25,11 +25,11 @@ from vision import vision_encoder, VisualDescriptionAgent
 # ------------------------------------------------------------------
 ANNOTATIONS_PATH = "data/iu_xray/annotation.json" 
 IMAGES_ROOT = "data/iu_xray/images"
-OUTPUT_FILE = "out/test_generations_judge.json"
-SCORES_FILE = "out/test_scores_judge.csv"
+OUTPUT_FILE = "out/test_generations_v2.json"
+SCORES_FILE = "out/test_scores_v2.csv"
 
-# Set to None to run ALL samples, or an integer (e.g., 20) for debugging
-LIMIT = None 
+# Run on first 15 test samples
+LIMIT = 15
 
 # ------------------------------------------------------------------
 # HELPERS
@@ -159,7 +159,7 @@ async def run_evaluation():
         
         formatter = ReportFormatter(draft_agent)
 
-        print(f"🚀 Generating missing samples...")
+        print(f"🚀 Generating {LIMIT} samples...")
         
         for idx, ex in enumerate(tqdm(test_data_raw)):
             sample_id = str(ex.get('id', idx))

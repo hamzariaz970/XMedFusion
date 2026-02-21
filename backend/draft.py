@@ -4,7 +4,6 @@ import os
 import json
 import pickle
 import torch
-import clip
 import re
 import warnings
 from pathlib import Path
@@ -17,36 +16,6 @@ import config
 
 # Suppress specific torch load warnings for cleaner output
 warnings.filterwarnings("ignore", category=FutureWarning)
-
-# -------------------------------
-# Device
-# -------------------------------
-if torch.cuda.is_available():
-    device = torch.device("cuda")
-elif torch.backends.mps.is_available():
-    device = torch.device("mps")
-else:
-    device = torch.device("cpu")
-
-print(f"Using device: {device}")
-
-
-# -------------------------------
-# Load fine-tuned CLIP
-# -------------------------------
-clip_model_path = r"model_weights/Draft_Agent/clip_medical.pth"
-model, preprocess = clip.load("ViT-B/32", device=device)
-model = model.float()
-
-# Check if weights file exists before loading to avoid generic errors
-if not os.path.exists(clip_model_path):
-    raise FileNotFoundError(f"Model weights not found at: {clip_model_path}")
-
-# safe_globals or strict loading might be needed in future torch versions, 
-# but for now we suppress the warning via filterwarnings above.
-model.load_state_dict(torch.load(clip_model_path, map_location=device))
-model.eval()
-print("✅ Fine-tuned CLIP loaded successfully")
 
 # -------------------------------
 # Load dataset and map image paths to reports (with caching)
@@ -93,40 +62,40 @@ def truncate_report(text, max_words=75):
     tokens = text.split()
     return " ".join(tokens[:max_words])
 
-def encode_image(image_path):
-    image = preprocess(Image.open(image_path)).unsqueeze(0).to(device)
-    with torch.no_grad():
-        img_feat = model.encode_image(image)
-        img_feat /= img_feat.norm(dim=-1, keepdim=True)
-    return img_feat
-
-def encode_texts(texts):
-    tokens = clip.tokenize(texts, truncate=True).to(device)
-    with torch.no_grad():
-        txt_feat = model.encode_text(tokens)
-        txt_feat /= txt_feat.norm(dim=-1, keepdim=True)
-    return txt_feat
-
 # -------------------------------
-# Retrieval Agent
+# Retrieval Agent (Uses shared BioMedCLIP VisionEncoder)
 # -------------------------------
 class RetrievalAgent:
-    def __init__(self, clip_model, preprocess, k=3, device='cuda'):
-        self.model = clip_model
-        self.preprocess = preprocess
-        self.device = device
+    """
+    Retrieves top-k similar reports using a shared VisionEncoder (BioMedCLIP).
+    The encoder provides encode_image() and encode_text() in the same embedding space.
+    """
+    def __init__(self, vision_encoder, k=3):
+        self.encoder = vision_encoder
         self.k = k
-        self.model.eval()
-        print(f"✅ Retrieval Agent initialized. Top-k={self.k}")
+        print(f"✅ Retrieval Agent initialized (BioMedCLIP). Top-k={self.k}")
 
     def retrieve_top_k(self, image_path, reports_dict):
         all_reports = list(set(reports_dict.values()))
         if not all_reports:
             print("⚠️ No reports found in dictionary.")
             return []
-            
-        text_features = encode_texts(all_reports)
-        img_feat = encode_image(image_path)
+
+        # Encode the target image using BioMedCLIP
+        img = Image.open(image_path).convert("RGB")
+        img_feat = self.encoder.encode_image(img)
+
+        # Encode all report texts using BioMedCLIP (256-token PubMedBERT tokenizer)
+        # Process in batches to avoid OOM on large report sets
+        BATCH_SIZE = 64
+        text_features_list = []
+        for i in range(0, len(all_reports), BATCH_SIZE):
+            batch = all_reports[i:i + BATCH_SIZE]
+            batch_feat = self.encoder.encode_text(batch)
+            text_features_list.append(batch_feat)
+        text_features = torch.cat(text_features_list, dim=0)
+
+        # Compute cosine similarity
         sims = cosine_similarity(img_feat, text_features)
         
         # Determine actual k based on available reports
@@ -185,6 +154,9 @@ class LocalLLMReportAgent:
 # Example usage
 # -------------------------------
 if __name__ == "__main__":
+    # Import vision encoder for testing
+    from vision import vision_encoder
+
     # Example image (replace with any preprocessed image from dataset)
     image_path = os.path.join(image_base_dir, "CXR10_IM-0002", "0.png")
 
@@ -202,13 +174,12 @@ if __name__ == "__main__":
                 if image_path.endswith(".png"): break
 
     if os.path.exists(image_path) and reports_dict:
-        # 1️⃣ Retrieve top-k similar reports
-        retrieval_agent = RetrievalAgent(model, preprocess, k=5, device=device)
+        # 1️⃣ Retrieve top-k similar reports (now using BioMedCLIP)
+        retrieval_agent = RetrievalAgent(vision_encoder, k=5)
         top_reports = retrieval_agent.retrieve_top_k(image_path, reports_dict)
 
         # 2️⃣ Generate structured report using local LLM
-        # Note: You can pass just "deepseek-r1:1.5b" now
-        llm_agent = LocalLLMReportAgent(model_name="deepseek-r1:1.5b")
+        llm_agent = LocalLLMReportAgent()
         visual_desc = "\n\n".join(truncate_report(r, 75) for r in top_reports)
         
         draft_report = llm_agent.generate_report(visual_desc)
@@ -217,49 +188,3 @@ if __name__ == "__main__":
         print(draft_report)
     else:
         print("❌ Could not run pipeline: Missing image or empty reports dictionary.")
-
-
-
-
-def zero_shot_classify(image_path, model, preprocess, device):
-    """
-    Scans the image for specific medical labels using CLIP.
-    Returns a string like: "Cardiomegaly (85%), Edema (12%)"
-    """
-    # 1. Define labels to check
-    labels = [
-        "Normal", "Cardiomegaly", "Pleural Effusion", "Pneumothorax", 
-        "Edema", "Consolidation", "Atelectasis", "Lung Opacity", "Fracture"
-    ]
-    
-    # 2. Create sentence prompts
-    text_prompts = [f"A chest x-ray showing {label}" for label in labels]
-    
-    # 3. Load & Encode Image
-    try:
-        image = preprocess(Image.open(image_path)).unsqueeze(0).to(device)
-    except Exception as e:
-        return f"Error processing image: {e}"
-    
-    # 4. Encode Text & Compare
-    text_tokens = clip.tokenize(text_prompts).to(device)
-    
-    with torch.no_grad():
-        img_features = model.encode_image(image)
-        text_features = model.encode_text(text_tokens)
-        
-        # Normalize features
-        img_features /= img_features.norm(dim=-1, keepdim=True)
-        text_features /= text_features.norm(dim=-1, keepdim=True)
-        
-        # Calculate similarity (scale by 100 for percentage)
-        similarity = (100.0 * img_features @ text_features.T).softmax(dim=-1)
-        values, indices = similarity[0].topk(3) # Top 3 matches
-
-    # 5. Format Output
-    results = []
-    for value, index in zip(values, indices):
-        prob = value.item() * 100 # Convert to readable percentage if needed, or keep raw
-        results.append(f"{labels[index]} ({value.item():.1f}%)")
-    
-    return ", ".join(results)

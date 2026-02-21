@@ -113,21 +113,24 @@ class VisionEncoder(nn.Module):
         return features
 
 class BioMedCLIPClassifierHead(nn.Module):
-    """
-    The trained head that detects diseases.
-    """
-    def __init__(self, num_classes):
+    """Deeper classifier head with residual connection. Must match training script."""
+    def __init__(self, num_classes, input_dim=512):
         super().__init__()
         self.head = nn.Sequential(
-            nn.Linear(512, 512),
-            nn.BatchNorm1d(512),
-            nn.ReLU(),
-            nn.Dropout(0.4),
-            nn.Linear(512, num_classes)
+            nn.Linear(input_dim, 256),
+            nn.BatchNorm1d(256),
+            nn.GELU(),
+            nn.Dropout(0.3),
+            nn.Linear(256, 128),
+            nn.BatchNorm1d(128),
+            nn.GELU(),
+            nn.Dropout(0.2),
+            nn.Linear(128, num_classes)
         )
+        self.residual = nn.Linear(input_dim, num_classes)
 
     def forward(self, features):
-        return self.head(features)
+        return self.head(features) + self.residual(features)
 
 # -------------------------------
 # GLOBAL INITIALIZATION
@@ -146,13 +149,41 @@ classifier = BioMedCLIPClassifierHead(num_classes=len(DISEASES)).to(device)
 if os.path.exists(TRAINED_HEAD_PATH):
     try:
         state_dict = torch.load(TRAINED_HEAD_PATH, map_location=device)
-        classifier.head.load_state_dict(state_dict)
+        classifier.load_state_dict(state_dict)
         classifier.eval()
         print(f"✅ Loaded Trained Classifier from {TRAINED_HEAD_PATH}")
     except Exception as e:
         print(f"⚠️ Error loading classifier weights: {e}")
 else:
     print(f"⚠️ Classifier weights not found at {TRAINED_HEAD_PATH}")
+
+# 2b. Load fine-tuned backbone weights if available
+TRAINED_BACKBONE_PATH = "model_weights/KG_Agent/biomed_clip/biomed_clip_backbone_finetuned.pth"
+if os.path.exists(TRAINED_BACKBONE_PATH):
+    try:
+        unfrozen_state = torch.load(TRAINED_BACKBONE_PATH, map_location=device)
+        model_state = vision_encoder.model.state_dict()
+        updated = 0
+        for name, value in unfrozen_state.items():
+            if name in model_state:
+                model_state[name] = value
+                updated += 1
+        if updated > 0:
+            vision_encoder.model.load_state_dict(model_state)
+            print(f"✅ Loaded fine-tuned backbone ({updated} params) from {TRAINED_BACKBONE_PATH}")
+    except:
+        pass
+
+# 2c. Load learned thresholds
+THRESHOLDS_PATH = "model_weights/KG_Agent/biomed_clip/thresholds.json"
+LEARNED_THRESHOLDS = {}
+if os.path.exists(THRESHOLDS_PATH):
+    try:
+        with open(THRESHOLDS_PATH, 'r') as f:
+            LEARNED_THRESHOLDS = json.load(f)
+        print(f"✅ Loaded learned thresholds from {THRESHOLDS_PATH}")
+    except:
+        pass
 
 # 3. Pre-compute Text Embeddings (Zero-Shot)
 disease_text_features = {}
@@ -171,6 +202,7 @@ with torch.no_grad():
 def get_hybrid_findings(img_embedding):
     """
     Combines Trained Head (Global) + Zero-Shot (Global) to suppress hallucinations.
+    Now uses learned thresholds and 50/50 weighting.
     """
     findings = {}
     
@@ -189,14 +221,16 @@ def get_hybrid_findings(img_embedding):
         # 2. Get Trained Score
         tr_prob = trained_map.get(disease, 0.0)
         
-        # 3. Hybrid Average (60% Zero-Shot, 40% Trained)
-        hybrid_score = (zs_prob * 0.6) + (tr_prob * 0.4)
+        # 3. IMPROVED: Equal hybrid weighting (trained model is better now)
+        hybrid_score = (zs_prob * 0.5) + (tr_prob * 0.5)
         
-        # 4. TUNED THRESHOLDS (Lowered for better sensitivity)
-        # Was 0.50, now 0.40 to catch "Mild" cases
-        threshold = 0.40
-        if disease == "Fracture": threshold = 0.60 # Keep high
-        if disease == "Nodule": threshold = 0.50
+        # 4. Use learned thresholds (with fallbacks)
+        if LEARNED_THRESHOLDS:
+            threshold = LEARNED_THRESHOLDS.get(disease, 0.40)
+        else:
+            threshold = 0.40
+            if disease == "Fracture": threshold = 0.50
+            if disease == "Nodule": threshold = 0.45
         
         findings[disease] = hybrid_score if hybrid_score > threshold else 0.0
         

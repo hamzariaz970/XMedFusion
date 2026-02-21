@@ -23,15 +23,19 @@ from synthesis import (
     LocalSynthesisAgent,
     RetrievalAgent,
     LocalLLMReportAgent,
-    VisionLLMAgent,
+    VisualDescriptionAgent,
     reports_dict,
-    clip_model,   # Renamed in synthesis.py to be specific
-    clip_prep,    # Renamed in synthesis.py to be specific
-    device
+    vision_encoder,
 )
 
 # Import the explainability function
-from explainability import run_explainability
+# NOTE: explainability.py was built for the old R2Gen vision model.
+# It needs to be updated to work with the current BioMedCLIP encoder.
+try:
+    from explainability import run_explainability
+except ImportError as e:
+    print(f"⚠️ Explainability module not available (needs update): {e}")
+    run_explainability = None
 
 # --- GLOBAL AGENT STORE ---
 # We keep agents here so they stay in memory (RAM) and don't reload per request
@@ -85,14 +89,14 @@ async def lifespan(app: FastAPI):
     model = ViTForImageClassification.from_pretrained(
         "google/vit-base-patch16-224"
     )
+    device = vision_encoder.device
     print(f"\n🚀 STARTUP: Loading AI Models on {device}...")
     print(f"🧠 LLM Engine: {config.OLLAMA_MODEL}")
     
-    # Initialize agents globally
-    # Note: These classes now default to config.OLLAMA_MODEL internally
-    agents["retrieval"] = RetrievalAgent(clip_model, clip_prep, k=3, device=device)
+    # Initialize agents globally (all share BioMedCLIP via vision_encoder)
+    agents["retrieval"] = RetrievalAgent(vision_encoder, k=3)
     agents["draft"] = LocalLLMReportAgent()
-    agents["vision"] = VisionLLMAgent()
+    agents["vision"] = VisualDescriptionAgent()
     agents["synthesis"] = LocalSynthesisAgent()
     
     print("✅ All AI Agents Ready! Server is listening.")
@@ -125,16 +129,15 @@ async def synthesize_report(file: UploadFile = File(...)):
     # We generate this first so it's ready to be injected into the stream
     heatmap_data_uri = None
     try:
-        # Offload blocking heavy compute to thread to keep server responsive
-        heatmap_path = await asyncio.to_thread(run_explainability, image_path, UPLOAD_DIR)
-        
-        # Convert to Base64 Data URI for easy frontend display
-        if heatmap_path and os.path.exists(heatmap_path):
-            # Using synchronous file read here is okay for small images, 
-            # but ideally should be async too if images are huge.
-            with open(heatmap_path, "rb") as f:
-                b64_data = base64.b64encode(f.read()).decode("utf-8")
-            heatmap_data_uri = f"data:image/png;base64,{b64_data}"
+        if run_explainability is not None:
+            # Offload blocking heavy compute to thread to keep server responsive
+            heatmap_path = await asyncio.to_thread(run_explainability, image_path, UPLOAD_DIR)
+            
+            # Convert to Base64 Data URI for easy frontend display
+            if heatmap_path and os.path.exists(heatmap_path):
+                with open(heatmap_path, "rb") as f:
+                    b64_data = base64.b64encode(f.read()).decode("utf-8")
+                heatmap_data_uri = f"data:image/png;base64,{b64_data}"
     except Exception as e:
         print(f"⚠️ Explainability failed: {e}")
 

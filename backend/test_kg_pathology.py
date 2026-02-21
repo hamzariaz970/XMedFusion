@@ -28,28 +28,48 @@ TARGET_PATHOLOGIES = [
 
 # Negation handling to ensure we pick TRULY sick patients
 NEGATION_PHRASES = [
-    "no ", "not ", "without ", "free of ", "negative for ", "absence of ", 
-    "unremarkable", "normal", "clear", "resolved"
+    "no ", "no evidence", "without ", "negative for", "free of",
+    "absent", "not ", "denies ", "ruled out",
+    "no definite", "no definitive", "no visible", "no acute", "no focal",
+    "no large", "no obvious", "no significant", "no suspicious",
+    "no displaced", "nondisplaced",
 ]
 
 def is_actually_sick(report, disease):
     """
     Returns True only if the disease is present and NOT negated.
+    Uses sentence-boundary-aware negation with 120-char context window.
     """
-    report = report.lower()
-    disease = disease.lower()
+    report_lower = report.lower()
+    disease_lower = disease.lower()
     
-    if disease not in report: return False
+    if disease_lower not in report_lower:
+        return False
     
-    start_idx = report.find(disease)
-    context = report[max(0, start_idx - 30): start_idx]
-    
-    for neg in NEGATION_PHRASES:
-        if neg in context: return False
-            
-    return True
+    # Check ALL occurrences
+    start = 0
+    while True:
+        pos = report_lower.find(disease_lower, start)
+        if pos == -1:
+            return False  # All occurrences were negated
+        
+        # Get context window (120 chars to cover long comma-separated lists)
+        context_start = max(0, pos - 120)
+        context = report_lower[context_start:pos]
+        
+        # Respect sentence boundaries
+        last_period = max(context.rfind('.'), context.rfind('!'), context.rfind('?'))
+        if last_period >= 0:
+            context = context[last_period + 1:]
+        
+        negated = any(neg in context for neg in NEGATION_PHRASES)
+        
+        if not negated:
+            return True  # Found a non-negated occurrence
+        
+        start = pos + len(disease_lower)
 
-def find_sick_patients(anno_path, pathology_list, samples_per_disease=3):
+def find_sick_patients(anno_path, pathology_list, samples_per_disease=5):
     """
     Finds verified sick patients for each disease.
     """
@@ -75,9 +95,23 @@ def find_sick_patients(anno_path, pathology_list, samples_per_disease=3):
         for item in all_samples:
             report = item.get("report", "").lower()
             if is_actually_sick(report, pathology):
+                # Verify image exists
+                img_list = item.get("image_path", [])
+                if not img_list: continue
+                img_rel = img_list[0] if isinstance(img_list, list) else img_list
+                if not os.path.exists(os.path.join(IMG_ROOT, img_rel)): continue
+                
                 found_samples[pathology].append(item)
                 if len(found_samples[pathology]) >= samples_per_disease:
                     break
+        
+        # Show what was selected
+        count = len(found_samples[pathology])
+        if count == 0:
+            print(f"  ⚠️  {pathology.upper()}: No verified positive cases found!")
+        else:
+            print(f"  ✅ {pathology.upper()}: Found {count} verified cases")
+    
     return found_samples
 
 def check_graph_for_disease(kg, disease_name):
@@ -117,25 +151,27 @@ def run_stress_test():
     # Load Trained Head explicitly
     classifier_head = BioMedCLIPClassifierHead(num_classes=len(DISEASES)).to(device)
     if os.path.exists(TRAINED_HEAD_PATH):
-        classifier_head.head.load_state_dict(torch.load(TRAINED_HEAD_PATH, map_location=device))
+        classifier_head.load_state_dict(torch.load(TRAINED_HEAD_PATH, map_location=device))
         classifier_head.eval()
         print("   ✅ Trained Head Loaded.")
     else:
         print("   ⚠️ Trained Head NOT FOUND (Results may be poor).")
 
-    # 2. Find Patients
-    sick_cases = find_sick_patients(ANNO_PATH, TARGET_PATHOLOGIES)
+    # 2. Find Patients (5 per disease for more robust testing)
+    sick_cases = find_sick_patients(ANNO_PATH, TARGET_PATHOLOGIES, samples_per_disease=5)
     print("-" * 60)
 
     # 3. Run Tests
     score_card = {"passes": 0, "fails": 0}
+    per_disease_scores = {}
     
     for disease, samples in sick_cases.items():
-        print(f"\n👉 Target: {disease.upper()}")
+        print(f"\n👉 Target: {disease.upper()} ({len(samples)} cases)")
+        per_disease_scores[disease] = {"pass": 0, "fail": 0}
         
         for item in samples:
             uid = item.get("id", "Unknown")
-            gt_report = item.get("report", "No Report")[:100] + "..."
+            gt_report = item.get("report", "No Report")
             
             img_list = item.get("image_path", [])
             if not img_list: continue
@@ -162,20 +198,31 @@ def run_stress_test():
                 if found:
                     print(f"   ✅ [PASS] {uid}: Graph contains '{node_name}'")
                     score_card["passes"] += 1
+                    per_disease_scores[disease]["pass"] += 1
                 else:
                     print(f"   ❌ [FAIL] {uid}: Disease missing from graph.")
-                    print(f"      GT: {gt_report}")
+                    print(f"      GT: {gt_report[:120]}...")
                     # Print what WAS found to debug
                     observations = [e[0] for e in kg['entities'] if e[1] == 'Observation']
                     print(f"      Graph found: {observations}")
                     score_card["fails"] += 1
+                    per_disease_scores[disease]["fail"] += 1
                     
             except Exception as e:
                 print(f"   ⚠️ Error processing {uid}: {e}")
 
-    print("\n" + "="*40)
-    print(f"📊 FINAL SCORE: {score_card['passes']} Passes / {score_card['fails']} Fails")
-    print("="*40)
+    # Summary
+    total = score_card['passes'] + score_card['fails']
+    print("\n" + "=" * 50)
+    print(f"📊 FINAL SCORE: {score_card['passes']} Passes / {score_card['fails']} Fails ({100*score_card['passes']/max(total,1):.0f}%)")
+    print("=" * 50)
+    print("\nPer-disease breakdown:")
+    for disease, scores in per_disease_scores.items():
+        p, f = scores["pass"], scores["fail"]
+        total_d = p + f
+        pct = 100 * p / max(total_d, 1)
+        bar = "█" * p + "░" * f
+        print(f"   {disease:>20s}: {bar} {p}/{total_d} ({pct:.0f}%)")
 
 if __name__ == "__main__":
     run_stress_test()

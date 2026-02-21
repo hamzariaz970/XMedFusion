@@ -20,10 +20,14 @@ from draft import (
 
 # --- 2. Import NEW Vision Agent (Updated API) ---
 from vision import (
-    vision_encoder,          # The global model instance
+    vision_encoder,          # The global model instance (shared with Draft Agent)
     get_hybrid_findings,     # The new detection logic
     VisualDescriptionAgent,  # The new writer class
 )
+
+# Re-export for app.py
+VisionLLMAgent = VisualDescriptionAgent  # Backwards-compat alias
+VisionEncoder = vision_encoder # Re-export the global encoder instance
 
 # --- 3. Import NEW KG Agent (Updated API) ---
 try:
@@ -270,11 +274,17 @@ class LocalSynthesisAgent:
         yield json.dumps({"status": "complete", "final_report": final_report, "knowledge_graph": kg_json}) + "\n"
 
 # -------------------------------
-# Example Usage (Test Block)
+# Example Usage (Test Block with Evaluation)
 # -------------------------------
 if __name__ == "__main__":
+    from pycocoevalcap.bleu.bleu import Bleu
+    from pycocoevalcap.rouge.rouge import Rouge
+    from pycocoevalcap.cider.cider import Cider
+    from langchain_community.chat_models import ChatOllama
+
     async def main_test():
-        # Test on a known image
+        # --- Config ---
+        ANNOTATIONS_PATH = "data/iu_xray/annotation.json"
         target_image = "data/iu_xray/images/CXR3655_IM-1817/0.png"
         
         if not os.path.exists(target_image):
@@ -285,36 +295,144 @@ if __name__ == "__main__":
                          break
                  if target_image: break
 
-        if os.path.exists(target_image):
-            print(f"Testing on: {target_image}")
-            image_paths = [target_image]
-            
-            # Initialize Agents
-            # Note: Retrieval now uses the shared vision_encoder models
-            retrieval_agent = RetrievalAgent(vision_encoder.model, vision_encoder.preprocess, k=5, device=vision_encoder.device)
-            draft_agent = LocalLLMReportAgent()
-            
-            # New Vision Writer
-            vision_agent = VisualDescriptionAgent() 
-            
-            synthesis_agent = LocalSynthesisAgent()
-
-            gen = synthesis_agent.generate_final_report(
-                draft_agent=draft_agent,
-                vision_agent=vision_agent,
-                retrieval_agent=retrieval_agent,
-                reports_dict=reports_dict,
-                image_paths=image_paths,
-            )
-
-            async for chunk in gen:
-                try:
-                    data = json.loads(chunk)
-                    if data.get("status") == "complete":
-                        print("\n✅ GENERATED REPORT:")
-                        print(data.get("final_report"))
-                except: continue
-        else:
+        if not os.path.exists(target_image):
             print("❌ Error: No valid image found.")
+            return
+
+        # --- Look up Ground Truth report for this image ---
+        gt_report = None
+        if os.path.exists(ANNOTATIONS_PATH):
+            with open(ANNOTATIONS_PATH, 'r') as f:
+                annotations = json.load(f)
+            for split in annotations:
+                for item in annotations[split]:
+                    for img_path in item.get("image_path", []):
+                        full = os.path.join("data/iu_xray/images", img_path.replace("/", os.sep))
+                        if os.path.abspath(full) == os.path.abspath(target_image):
+                            gt_report = item["report"]
+                            break
+                    if gt_report: break
+                if gt_report: break
+        
+        print(f"Testing on: {target_image}")
+        if gt_report:
+            print(f"📄 Ground Truth: {gt_report[:200]}...")
+        else:
+            print("⚠️ No ground truth found — will skip evaluation metrics.")
+        
+        # --- Run Pipeline ---
+        image_paths = [target_image]
+        retrieval_agent = RetrievalAgent(vision_encoder, k=3)
+        draft_agent = LocalLLMReportAgent()
+        vision_agent = VisualDescriptionAgent() 
+        synthesis_agent = LocalSynthesisAgent()
+
+        generated_report = None
+        kg_json = None
+        gen = synthesis_agent.generate_final_report(
+            draft_agent=draft_agent,
+            vision_agent=vision_agent,
+            retrieval_agent=retrieval_agent,
+            reports_dict=reports_dict,
+            image_paths=image_paths,
+        )
+
+        async for chunk in gen:
+            try:
+                data = json.loads(chunk)
+                if data.get("status") == "complete":
+                    generated_report = data.get("final_report")
+                    kg_json = data.get("knowledge_graph")
+            except: continue
+        
+        if not generated_report:
+            print("❌ Pipeline failed to generate a report.")
+            return
+
+        print("\n" + "=" * 60)
+        print("📄 GROUND TRUTH REPORT:")
+        print("=" * 60)
+        print(gt_report if gt_report else "N/A")
+        
+        print("\n" + "=" * 60)
+        print("✅ GENERATED REPORT:")
+        print("=" * 60)
+        print(generated_report)
+        
+        if not gt_report:
+            return
+        
+        # --- NLG Metrics ---
+        print("\n" + "=" * 60)
+        print("📊 NLG METRICS (vs Ground Truth)")
+        print("=" * 60)
+        
+        ref = {0: [gt_report]}
+        hyp = {0: [generated_report]}
+        
+        scorers = [
+            (Bleu(4), ["BLEU-1", "BLEU-2", "BLEU-3", "BLEU-4"]),
+            (Rouge(), "ROUGE-L"),
+            (Cider(), "CIDEr"),
+        ]
+        
+        for scorer, method in scorers:
+            try:
+                score, _ = scorer.compute_score(ref, hyp)
+                if isinstance(method, list):
+                    for m, s in zip(method, score):
+                        print(f"  {m:>10s}: {s:.4f}")
+                else:
+                    print(f"  {method:>10s}: {score:.4f}")
+            except Exception as e:
+                print(f"  {method}: Error — {e}")
+        
+        # --- LLM-as-a-Judge ---
+        print("\n" + "=" * 60)
+        print("🧑‍⚖️ LLM JUDGE SCORES (via " + config.OLLAMA_JUDGE_MODEL + ")")
+        print("=" * 60)
+        
+        try:
+            judge_llm = ChatOllama(
+                model=config.OLLAMA_JUDGE_MODEL,
+                temperature=0.0
+            )
+            
+            judge_prompt = f"""You are an expert radiologist and medical auditor. Evaluate the AI-generated report against the Ground Truth (GT) report.
+Rate the AI report on the following 5 dimensions strictly on a scale of 1-10 (10 is perfect/identical to GT quality):
+
+1. **Coverage of Key Findings**: Does the AI report include all critical clinical findings present in the GT?
+2. **Consistency**: Does the AI report contradict the GT? (10 = No contradictions).
+3. **Diagnostic Accuracy**: Is the overall clinical impression and diagnosis correct?
+4. **Stylistic Alignment**: Does the writing style match the GT (professional radiology style)?
+5. **Conciseness**: Is the report concise and free of unnecessary fluff?
+
+GT: "{gt_report}"
+AI: "{generated_report}"
+
+Output ONLY valid JSON:
+{{
+  "coverage": <int>,
+  "consistency": <int>,
+  "accuracy": <int>,
+  "style": <int>,
+  "conciseness": <int>
+}}"""
+            
+            response = judge_llm.invoke(judge_prompt)
+            content = response.content if hasattr(response, "content") else str(response)
+            content = re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL).strip()
+            
+            match = re.search(r'\{.*\}', content, re.DOTALL)
+            if match:
+                scores = json.loads(match.group())
+                for dim, val in scores.items():
+                    print(f"  {dim:>15s}: {val}/10")
+                avg = sum(scores.values()) / len(scores)
+                print(f"  {'AVERAGE':>15s}: {avg:.1f}/10")
+            else:
+                print(f"  ⚠️ Could not parse judge response: {content[:200]}")
+        except Exception as e:
+            print(f"  ❌ Judge failed: {e}")
 
     asyncio.run(main_test())
