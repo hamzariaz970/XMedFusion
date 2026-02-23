@@ -126,6 +126,13 @@ const Index = () => {
                 </Button>
               </Link>
             </div>
+
+            <p className="mt-6 text-sm text-muted-foreground animate-fade-in" style={{ animationDelay: '0.3s' }}>
+              Already have an account?{" "}
+              <Link to="/login" className="text-primary hover:underline font-medium">
+                Sign In
+              </Link>
+            </p>
           </div>
         </div>
       </section>

@@ -130,6 +130,14 @@ const UploadXray = () => {
             else if (data.status === "draft_start") { setActiveAgentIndex(1); setProgress(AGENT_STEPS[1].progress); } 
             else if (data.status === "kg_start") { setActiveAgentIndex(2); setProgress(AGENT_STEPS[2].progress); } 
             else if (data.status === "synthesis_start") { setActiveAgentIndex(3); setProgress(AGENT_STEPS[3].progress); } 
+            else if (data.status === "error") {
+              alert(data.message);
+              setTempFile(null);
+              setTempPreview(null);
+              setCurrentStep('idle');
+              setProgress(0);
+              return; // Stop processing
+            }
             else if (data.status === "complete") {
               const parsedReport = parseReportText(data.final_report);
               setAnalysisResults(file, objectUrl, parsedReport, data.knowledge_graph, data.heatmap);

@@ -9,6 +9,7 @@ import {
   X,
   Users,
   FileSearch,
+  LogIn,
 } from "lucide-react";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
@@ -60,6 +61,15 @@ export const Navbar = () => {
                 </Button>
               </Link>
             ))}
+          </div>
+
+          <div className="hidden md:flex items-center gap-2">
+            <Link to="/login">
+              <Button variant="outline" size="sm" className="gap-2">
+                <LogIn className="w-4 h-4" />
+                Sign In
+              </Button>
+            </Link>
           </div>
 
           {/* Mobile Menu Button */}

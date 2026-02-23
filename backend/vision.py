@@ -237,6 +237,52 @@ def get_hybrid_findings(img_embedding):
     return findings
 
 # -------------------------------
+# Logic: Scan Validation (Zero-Shot)
+# -------------------------------
+def is_medical_scan(image, vision_encoder, threshold=0.1):
+    """
+    Uses BioMedCLIP zero-shot to check if image is a medical scan vs random object.
+    """
+    # Define labels for classification
+    labels = [
+        "a medical x-ray or ct scan", 
+        "a photograph of a person", 
+        "a photograph of an animal", 
+        "a photograph of a cat",
+        "a picture of furniture or household objects",
+        "a landscape or nature photograph",
+        "text or a document",
+        "a digital illustration or icon"
+    ]
+    
+    # Pre-compute text embeddings for these labels
+    with torch.no_grad():
+        # Using the robust encode_text with the HF tokenizer
+        text_features = vision_encoder.encode_text(labels)
+        
+        # Encode image
+        img_features = vision_encoder.encode_image(image)
+        
+        # Get similarities
+        # Calculate cosine similarity (100.0 is the temperature used in CLIP)
+        logits = (100.0 * img_features @ text_features.T).softmax(dim=-1).squeeze()
+        
+    probs = logits.cpu().numpy()
+    
+    # Index 0 is our "medical scan" label
+    medical_prob = probs[0]
+    
+    # Log for debugging
+    print(f"[SCAN VALIDATOR] Medical Scan Probability: {medical_prob:.4f}")
+    for i, label in enumerate(labels):
+        print(f"   - {label}: {probs[i]:.4f}")
+        
+    # Check if index 0 has the highest probability OR is above a safe threshold
+    # Sometimes complex scans might have slightly lower confidence than 'clear' categories
+    is_top = np.argmax(probs) == 0
+    return is_top or medical_prob > threshold, medical_prob, labels[np.argmax(probs)]
+
+# -------------------------------
 # Local LLM Agent
 # -------------------------------
 class VisualDescriptionAgent:

@@ -116,6 +116,9 @@ app.add_middleware(
 UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
+from vision import is_medical_scan  # Scan Validation (zero-shot BioMedCLIP)
+from PIL import Image
+
 @app.post("/api/synthesize-report")
 async def synthesize_report(file: UploadFile = File(...)):
     # 1. Save the Uploaded Image
@@ -125,7 +128,28 @@ async def synthesize_report(file: UploadFile = File(...)):
     with open(image_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
-    # 2. Generate Heatmap (Explainability)
+    # 2. VALIDATE: Check if it's actually a scan
+    try:
+        raw_image = Image.open(image_path).convert("RGB")
+        is_valid, score, top_label = is_medical_scan(raw_image, vision_encoder)
+        
+        if not is_valid:
+            # Delete the invalid file
+            os.remove(image_path)
+            # Return error stream or direct 400
+            async def error_stream():
+                yield json.dumps({
+                    "status": "error", 
+                    "message": f"Validation Failed: This image appears to be '{top_label}', not a medical scan. Please upload an X-ray or CT scan."
+                }) + "\n"
+            return StreamingResponse(error_stream(), media_type="application/x-ndjson")
+            
+    except Exception as e:
+        print(f"⚠️ Validation error: {e}")
+        # Proceed if validation fails due to error (optimistic) or return error?
+        # Let's be safe and log it.
+
+    # 3. Generate Heatmap (Explainability)
     # We generate this first so it's ready to be injected into the stream
     heatmap_data_uri = None
     try:

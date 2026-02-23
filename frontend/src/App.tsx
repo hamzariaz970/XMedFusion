@@ -4,6 +4,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import Index from "./pages/Index";
+import Login from "./pages/Login";
 import PatientDashboard from "./pages/PatientDashboard";
 import UploadXray from "./pages/UploadXray";
 import ExplainabilityModule from "./pages/ExplainabilityModule";
@@ -23,6 +24,7 @@ const App = () => (
         <BrowserRouter>
           <Routes>
             <Route path="/" element={<Index />} />
+            <Route path="/login" element={<Login />} />
             <Route path="/patients" element={<PatientDashboard />} />
             <Route path="/upload" element={<UploadXray />} />
             <Route path="/explainability" element={<ExplainabilityModule />} />
