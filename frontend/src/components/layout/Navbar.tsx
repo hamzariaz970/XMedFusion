@@ -10,6 +10,7 @@ import {
   Users,
   FileSearch,
   LogIn,
+  ShieldCheck,
 } from "lucide-react";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
@@ -64,6 +65,16 @@ export const Navbar = () => {
           </div>
 
           <div className="hidden md:flex items-center gap-2">
+            <Link to="/admin">
+              <Button
+                variant={location.pathname === "/admin" ? "default" : "ghost"}
+                size="sm"
+                className="gap-2"
+              >
+                <ShieldCheck className="w-4 h-4" />
+                Admin
+              </Button>
+            </Link>
             <Link to="/login">
               <Button variant="outline" size="sm" className="gap-2">
                 <LogIn className="w-4 h-4" />

@@ -200,6 +200,29 @@ async def synthesize_report(file: UploadFile = File(...)):
         media_type="application/x-ndjson"
     )
 
+# ── Health / Metrics Endpoint ──────────────────────
+import psutil
+
+_server_start_time = time.time()
+
+@app.get("/api/health")
+async def health():
+    import torch as _torch
+    mem = psutil.virtual_memory()
+    result = {
+        "status": "healthy",
+        "uptime_seconds": int(time.time() - _server_start_time),
+        "cpu_percent": psutil.cpu_percent(interval=0.3),
+        "memory_used_mb": round(mem.used / (1024 ** 2)),
+        "memory_total_mb": round(mem.total / (1024 ** 2)),
+        "gpu_available": _torch.cuda.is_available(),
+    }
+    if _torch.cuda.is_available():
+        result["gpu_name"] = _torch.cuda.get_device_name(0)
+        result["gpu_memory_used_mb"] = round(_torch.cuda.memory_allocated(0) / (1024 ** 2))
+        result["gpu_memory_total_mb"] = round(_torch.cuda.get_device_properties(0).total_mem / (1024 ** 2))
+    return result
+
 if __name__ == "__main__":
     # 0.0.0.0 allows access from other devices/network
     # reload=True is helpful during development

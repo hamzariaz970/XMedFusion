@@ -5,7 +5,10 @@ export interface ParsedReport {
   findings: string;
   impression: string;
   labels: string[];
+  recommendation?: string;
 }
+
+export type FeedbackStatus = 'none' | 'reviewing' | 'draft' | 'approved';
 
 interface AnalysisContextType {
   // Data
@@ -13,7 +16,11 @@ interface AnalysisContextType {
   previewUrl: string | null;
   report: ParsedReport | null;
   knowledgeGraphData: any | null; 
-  heatmapData: string | null; // <--- NEW FIELD (Base64 Data URI)
+  heatmapData: string | null;
+
+  // HITL Feedback
+  feedbackStatus: FeedbackStatus;
+  setFeedbackStatus: (s: FeedbackStatus) => void;
   
   // Actions
   setAnalysisResults: (
@@ -21,7 +28,7 @@ interface AnalysisContextType {
     url: string, 
     report: ParsedReport, 
     kgData: any,
-    heatmap: string | null // <--- UPDATED SIGNATURE
+    heatmap: string | null
   ) => void;
   
   resetAnalysis: () => void;
@@ -34,20 +41,22 @@ export const AnalysisProvider = ({ children }: { children: ReactNode }) => {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [report, setReport] = useState<ParsedReport | null>(null);
   const [knowledgeGraphData, setKgData] = useState<any | null>(null);
-  const [heatmapData, setHeatmapData] = useState<string | null>(null); // <--- NEW STATE
+  const [heatmapData, setHeatmapData] = useState<string | null>(null);
+  const [feedbackStatus, setFeedbackStatus] = useState<FeedbackStatus>('none');
 
   const setAnalysisResults = (
     file: File, 
     url: string, 
     reportData: ParsedReport, 
     kgData: any,
-    heatmap: string | null // <--- RECEIVE HEATMAP
+    heatmap: string | null
   ) => {
     setUploadedFile(file);
     setPreviewUrl(url);
     setReport(reportData);
     setKgData(kgData);
-    setHeatmapData(heatmap); // <--- SAVE IT
+    setHeatmapData(heatmap);
+    setFeedbackStatus('none');
   };
 
   const resetAnalysis = () => {
@@ -56,7 +65,8 @@ export const AnalysisProvider = ({ children }: { children: ReactNode }) => {
     setPreviewUrl(null);
     setReport(null);
     setKgData(null);
-    setHeatmapData(null); // <--- RESET IT
+    setHeatmapData(null);
+    setFeedbackStatus('none');
   };
 
   return (
@@ -65,7 +75,9 @@ export const AnalysisProvider = ({ children }: { children: ReactNode }) => {
       previewUrl, 
       report, 
       knowledgeGraphData, 
-      heatmapData, // <--- EXPOSE IT
+      heatmapData,
+      feedbackStatus,
+      setFeedbackStatus,
       setAnalysisResults, 
       resetAnalysis 
     }}>

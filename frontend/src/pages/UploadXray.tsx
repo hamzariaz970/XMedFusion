@@ -19,7 +19,8 @@ import {
   Eye,
   Download,
   FileDown,
-  ArrowRight
+  ArrowRight,
+  UserCheck
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -33,6 +34,7 @@ import jsPDF from "jspdf";
 
 // Import Global Context
 import { useAnalysis, ParsedReport } from "@/context/AnalysisContext";
+import FeedbackPanel from "@/components/FeedbackPanel";
 
 type ProcessingStep = 'idle' | 'uploading' | 'analyzing' | 'complete';
 
@@ -171,6 +173,7 @@ const UploadXray = () => {
   }, [resetAnalysis, tempPreview]);
 
   const extendedReport = report as ExtendedParsedReport | null;
+  const { feedbackStatus, setFeedbackStatus } = useAnalysis();
 
   // ------------------------------------------------------------------
   // DOWNLOAD HANDLERS (FIXED PDF WRAPPING)
@@ -476,6 +479,21 @@ const UploadXray = () => {
                       </Button>
                     </Link>
                   </div>
+
+                  {/* HITL Feedback */}
+                  {feedbackStatus === 'none' && (
+                    <Button
+                      variant="outline"
+                      className="w-full gap-2 border-amber-500/30 text-amber-600 hover:bg-amber-500/10 hover:border-amber-500/50"
+                      onClick={() => setFeedbackStatus('reviewing')}
+                    >
+                      <UserCheck className="w-4 h-4" />
+                      Edit &amp; Review Report
+                    </Button>
+                  )}
+                  {(feedbackStatus === 'reviewing' || feedbackStatus === 'draft' || feedbackStatus === 'approved') && (
+                    <FeedbackPanel onReAnalyze={handleReset} />
+                  )}
                 </>
               ) : (
                 <Card className={cn(
