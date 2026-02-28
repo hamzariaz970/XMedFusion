@@ -121,7 +121,11 @@ const AdminDashboard = () => {
 
   const fetchHealth = useCallback(async () => {
     try {
-      const res = await fetch("http://127.0.0.1:8000/api/health", { signal: AbortSignal.timeout(3000) });
+      const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
+      const res = await fetch(`${API_BASE_URL}/api/health`, {
+        signal: AbortSignal.timeout(3000),
+        headers: { "ngrok-skip-browser-warning": "true" }
+      });
       if (res.ok) {
         setHealth(await res.json());
         setHealthError(false);

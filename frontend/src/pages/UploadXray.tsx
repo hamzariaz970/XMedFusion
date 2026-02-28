@@ -3,18 +3,18 @@ import { Layout } from "@/components/layout/Layout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
-import { 
-  Upload, 
-  Loader2, 
+import {
+  Upload,
+  Loader2,
   Brain,
   FileText,
   Sparkles,
   RefreshCw,
   Tag,
   Stethoscope,
-  Scan,        
-  Database,    
-  Network,     
+  Scan,
+  Database,
+  Network,
   CheckCircle2,
   Eye,
   Download,
@@ -30,7 +30,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { Link } from "react-router-dom";
-import jsPDF from "jspdf"; 
+import jsPDF from "jspdf";
 
 // Import Global Context
 import { useAnalysis, ParsedReport } from "@/context/AnalysisContext";
@@ -50,12 +50,12 @@ const AGENT_STEPS = [
 ];
 
 const UploadXray = () => {
-  const { 
-    uploadedFile, 
-    previewUrl, 
-    report, 
-    setAnalysisResults, 
-    resetAnalysis 
+  const {
+    uploadedFile,
+    previewUrl,
+    report,
+    setAnalysisResults,
+    resetAnalysis
   } = useAnalysis();
 
   const [tempFile, setTempFile] = useState<File | null>(null);
@@ -104,9 +104,11 @@ const UploadXray = () => {
 
     try {
       setCurrentStep('analyzing');
-      const response = await fetch("http://localhost:8000/api/synthesize-report", {
+      const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
+      const response = await fetch(`${API_BASE_URL}/api/synthesize-report`, {
         method: "POST",
         body: formData,
+        headers: { "ngrok-skip-browser-warning": "true" }
       });
 
       if (!response.ok) throw new Error("Synthesis failed");
@@ -122,16 +124,16 @@ const UploadXray = () => {
 
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split("\n");
-        buffer = lines.pop() || ""; 
+        buffer = lines.pop() || "";
 
         for (const line of lines) {
           if (!line.trim()) continue;
           try {
             const data = JSON.parse(line);
-            if (data.status === "vision_start") { setActiveAgentIndex(0); setProgress(AGENT_STEPS[0].progress); } 
-            else if (data.status === "draft_start") { setActiveAgentIndex(1); setProgress(AGENT_STEPS[1].progress); } 
-            else if (data.status === "kg_start") { setActiveAgentIndex(2); setProgress(AGENT_STEPS[2].progress); } 
-            else if (data.status === "synthesis_start") { setActiveAgentIndex(3); setProgress(AGENT_STEPS[3].progress); } 
+            if (data.status === "vision_start") { setActiveAgentIndex(0); setProgress(AGENT_STEPS[0].progress); }
+            else if (data.status === "draft_start") { setActiveAgentIndex(1); setProgress(AGENT_STEPS[1].progress); }
+            else if (data.status === "kg_start") { setActiveAgentIndex(2); setProgress(AGENT_STEPS[2].progress); }
+            else if (data.status === "synthesis_start") { setActiveAgentIndex(3); setProgress(AGENT_STEPS[3].progress); }
             else if (data.status === "error") {
               alert(data.message);
               setTempFile(null);
@@ -164,8 +166,8 @@ const UploadXray = () => {
 
   const handleReset = useCallback(() => {
     if (tempPreview) URL.revokeObjectURL(tempPreview);
-    resetAnalysis();     
-    setTempFile(null);   
+    resetAnalysis();
+    setTempFile(null);
     setTempPreview(null);
     setCurrentStep('idle');
     setProgress(0);
@@ -196,11 +198,11 @@ const UploadXray = () => {
     const doc = new jsPDF();
     const pageWidth = doc.internal.pageSize.getWidth();
     const pageHeight = doc.internal.pageSize.getHeight();
-    
+
     // Config
     const margin = 20;
     // Reduce width slightly more to ensure safe right margin
-    const maxLineWidth = pageWidth - (margin * 2.2); 
+    const maxLineWidth = pageWidth - (margin * 2.2);
     const lineHeight = 7;
 
     let yPos = 20;
@@ -210,7 +212,7 @@ const UploadXray = () => {
     doc.setFont("helvetica", "bold");
     doc.text("X-MedFusion AI Report", margin, yPos);
     yPos += 10;
-    
+
     doc.setFontSize(10);
     doc.setFont("helvetica", "normal");
     doc.setTextColor(100);
@@ -225,15 +227,15 @@ const UploadXray = () => {
         const img = new Image();
         img.src = displayUrl;
         await new Promise((resolve) => { img.onload = resolve; });
-        
+
         const imgProps = doc.getImageProperties(img);
         const pdfImgWidth = 60; // mm
         const pdfImgHeight = (imgProps.height * pdfImgWidth) / imgProps.width;
-        
+
         // Check if image fits on page, else add page
         if (yPos + pdfImgHeight > pageHeight - margin) {
-            doc.addPage();
-            yPos = margin;
+          doc.addPage();
+          yPos = margin;
         }
 
         doc.addImage(img, 'PNG', margin, yPos, pdfImgWidth, pdfImgHeight);
@@ -243,69 +245,69 @@ const UploadXray = () => {
       }
     }
 
-    doc.setTextColor(0); 
+    doc.setTextColor(0);
 
     // Helper: Add Section with Auto-Wrapping and Auto-Paging
     const addSection = (title: string, content: string) => {
-        // Check if title fits
-        if (yPos > pageHeight - margin) { doc.addPage(); yPos = margin; }
-        
-        doc.setFontSize(12);
-        doc.setFont("helvetica", "bold");
-        doc.text(title, margin, yPos);
-        yPos += 6;
-        
-        doc.setFontSize(11);
-        doc.setFont("helvetica", "normal");
-        
-        // CRITICAL: Split text into lines that fit within maxLineWidth
-        const lines = doc.splitTextToSize(content, maxLineWidth);
-        
-        // Check if content fits, if not, handle paging
-        // (Simple approach: if huge block, just dump it. For better PDF, iterate lines)
-        if (yPos + (lines.length * 6) > pageHeight - margin) {
-             doc.addPage(); 
-             yPos = margin; 
-        }
+      // Check if title fits
+      if (yPos > pageHeight - margin) { doc.addPage(); yPos = margin; }
 
-        doc.text(lines, margin, yPos);
-        yPos += (lines.length * 6) + 6; // Spacing after section
+      doc.setFontSize(12);
+      doc.setFont("helvetica", "bold");
+      doc.text(title, margin, yPos);
+      yPos += 6;
+
+      doc.setFontSize(11);
+      doc.setFont("helvetica", "normal");
+
+      // CRITICAL: Split text into lines that fit within maxLineWidth
+      const lines = doc.splitTextToSize(content, maxLineWidth);
+
+      // Check if content fits, if not, handle paging
+      // (Simple approach: if huge block, just dump it. For better PDF, iterate lines)
+      if (yPos + (lines.length * 6) > pageHeight - margin) {
+        doc.addPage();
+        yPos = margin;
+      }
+
+      doc.text(lines, margin, yPos);
+      yPos += (lines.length * 6) + 6; // Spacing after section
     };
 
     // 3. Report Sections
     addSection("FINDINGS", extendedReport.findings);
     addSection("IMPRESSION", extendedReport.impression);
-    
+
     if (extendedReport.recommendation) {
-        addSection("RECOMMENDATION", extendedReport.recommendation);
+      addSection("RECOMMENDATION", extendedReport.recommendation);
     }
 
     // 4. Labels (FIXED: Now wrapped!)
     if (yPos > pageHeight - margin) { doc.addPage(); yPos = margin; }
-    
+
     doc.setFontSize(12);
     doc.setFont("helvetica", "bold");
     doc.text("DETECTED LABELS", margin, yPos);
     yPos += 6;
-    
+
     doc.setFontSize(10);
     doc.setFont("helvetica", "normal");
     doc.setTextColor(50);
-    
+
     // FIX: Split label string into wrapped lines
     const labelString = extendedReport.labels.join(", ");
     const labelLines = doc.splitTextToSize(labelString, maxLineWidth);
-    
+
     doc.text(labelLines, margin, yPos);
     yPos += (labelLines.length * 5) + 15;
 
     // 5. Disclaimer Footer
     const disclaimer = "DISCLAIMER: This report is generated by an automated AI system (X-MedFusion). It is intended for research and educational purposes only and does not constitute a valid medical diagnosis.";
     const discLines = doc.splitTextToSize(disclaimer, maxLineWidth);
-    
+
     // Always put disclaimer at bottom of current page, or new page if full
     if (yPos > pageHeight - 30) { doc.addPage(); }
-    
+
     const footerY = doc.internal.pageSize.getHeight() - 20;
     doc.setTextColor(150);
     doc.setFontSize(8);
@@ -353,7 +355,7 @@ const UploadXray = () => {
                     <div className="p-4">
                       <div className="relative aspect-square rounded-lg overflow-hidden bg-black mb-4">
                         <img src={displayUrl!} alt="X-ray" className="w-full h-full object-contain" />
-                        
+
                         {currentStep === 'analyzing' && (
                           <div className="absolute inset-0 bg-background/60 backdrop-blur-sm flex flex-col items-center justify-center text-center p-4">
                             <Brain className="w-12 h-12 text-primary animate-pulse mb-4" />
@@ -365,7 +367,7 @@ const UploadXray = () => {
                       <div className="flex justify-between items-center text-sm">
                         <span className="truncate max-w-[200px]">{displayFile.name}</span>
                         <Button variant="ghost" size="sm" onClick={handleReset} disabled={currentStep === 'analyzing'}>
-                          <RefreshCw className={cn("w-3 h-3 mr-1", currentStep === 'analyzing' && "animate-spin")} /> 
+                          <RefreshCw className={cn("w-3 h-3 mr-1", currentStep === 'analyzing' && "animate-spin")} />
                           {currentStep === 'analyzing' ? 'Busy...' : 'Reset'}
                         </Button>
                       </div>
@@ -378,9 +380,9 @@ const UploadXray = () => {
                 <div className="space-y-2 animate-in fade-in slide-in-from-bottom-2">
                   <div className="flex justify-between text-xs font-bold uppercase tracking-wider text-muted-foreground">
                     <span>
-                      {currentStep === 'complete' ? 'Analysis Complete' : 
-                       currentStep === 'uploading' ? 'Uploading...' : 
-                       AGENT_STEPS[activeAgentIndex].label}
+                      {currentStep === 'complete' ? 'Analysis Complete' :
+                        currentStep === 'uploading' ? 'Uploading...' :
+                          AGENT_STEPS[activeAgentIndex].label}
                     </span>
                     <span>{progress}%</span>
                   </div>
@@ -399,7 +401,7 @@ const UploadXray = () => {
                         <FileText className="w-5 h-5 text-primary" />
                         Synthesized Report
                       </CardTitle>
-                      
+
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <Button variant="outline" size="sm" className="h-8 gap-2">
@@ -419,7 +421,7 @@ const UploadXray = () => {
 
                     </CardHeader>
                     <CardContent className="p-6 space-y-6">
-                      
+
                       <section>
                         <h4 className="text-xs font-black uppercase text-muted-foreground mb-2 flex items-center gap-2">
                           <Brain className="w-3 h-3" /> Findings

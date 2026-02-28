@@ -64,6 +64,7 @@ backend/*.png
 backend/*.json
 backend/out/
 backend/out_graph/
+backend/ngrok-v3-stable-linux-amd64.tgz
 
 # Ignore large model files (unless you specifically want to track them)
 backend/model_weights/
