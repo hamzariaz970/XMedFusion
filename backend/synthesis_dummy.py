@@ -9,8 +9,6 @@ from langchain_community.chat_models import ChatOllama
 from validators import validate_report
 from PIL import Image 
 import config
-from explain import generate_explainable_image
-from xray_filter import is_chest_xray  # <--- NEW IMPORT
 
 # Import the new explainer function (Make sure your file is named explain.py)
 from explain import generate_explainable_image
@@ -110,18 +108,6 @@ class LocalSynthesisAgent:
 
     async def generate_final_report(self, draft_agent, vision_agent, retrieval_agent, reports_dict, image_paths):
         target_image = image_paths[0]
-        yield json.dumps({"status": "validating", "message": "Checking if image is a valid X-Ray..."}) + "\n"
-        
-        is_valid, confidence = is_chest_xray(target_image)
-        
-        if not is_valid:
-            error_msg = f"Invalid Image Detected. This does not look like a Chest X-Ray (Confidence: {confidence:.1%}). Please upload a valid chest radiograph."
-            print(f"❌ {error_msg}")
-            
-            # Immediately halt and send the error back to the frontend
-            yield json.dumps({"status": "error", "message": error_msg}) + "\n"
-            return
-        
         yield json.dumps({"status": "parallel_start", "message": "Running Agents..."}) + "\n"
 
         # --- SEQUENTIAL HELPER FUNCTIONS (Updated for New APIs) ---
@@ -337,67 +323,95 @@ class LocalSynthesisAgent:
 # -------------------------------
 # Example Usage (Test Block)
 # -------------------------------
-# Example Usage (Test Block)
-# -------------------------------
 if __name__ == "__main__":
     async def main_test():
+        # Test on a known image
+        target_image = "data/iu_xray/images/CXR2130_IM-0755/0.png"  # Change this path to test on different images
         
-        # =================================================================
-        # ⬇️ PASTE YOUR IMAGE PATH DIRECTLY HERE ⬇️
-        # =================================================================
-        target_image = "data/test/image10.jpg"
-        
-        # Verify the path exists before starting
         if not os.path.exists(target_image):
-            print(f"❌ Error: The path '{target_image}' does not exist.")
-            print("💡 Tip: Check for typos or make sure you included the file extension (.png, .jpg).")
-            return
+             for root, _, files in os.walk("data/iu_xray/images"):
+                 for f in files:
+                     if f.endswith(".png"):
+                         target_image = os.path.join(root, f)
+                         break
+                 if target_image: break
 
-        print(f"\n🚀 Testing on: {target_image}\n")
-        image_paths = [target_image]
-        
-        # Initialize Agents
-        retrieval_agent = RetrievalAgent(vision_encoder, k=5)
-        draft_agent = LocalLLMReportAgent()
-        vision_agent = VisualDescriptionAgent() 
-        synthesis_agent = LocalSynthesisAgent()
+        if os.path.exists(target_image):
+            print(f"Testing on: {target_image}")
+            image_paths = [target_image]
+            
+            # Initialize Agents
+            retrieval_agent = RetrievalAgent(vision_encoder, k=5)
+            draft_agent = LocalLLMReportAgent()
+            vision_agent = VisualDescriptionAgent() 
+            synthesis_agent = LocalSynthesisAgent()
 
-        # Run the Pipeline
-        gen = synthesis_agent.generate_final_report(
-            draft_agent=draft_agent,
-            vision_agent=vision_agent,
-            retrieval_agent=retrieval_agent,
-            reports_dict=reports_dict,
-            image_paths=image_paths,
-        )
+            gen = synthesis_agent.generate_final_report(
+                draft_agent=draft_agent,
+                vision_agent=vision_agent,
+                retrieval_agent=retrieval_agent,
+                reports_dict=reports_dict,
+                image_paths=image_paths,
+            )
 
-        async for chunk in gen:
-            try:
-                data = json.loads(chunk.strip())
-                status = data.get("status")
-                
-                # Print live updates
-                if status != "complete" and status != "streaming":
-                    print(f" 🔄 {status.upper()}: {data.get('message', '')}")
-                elif status == "error":
-                    # This catches the Bouncer/Filter error and stops gracefully!
-                    print(f" ❌ ERROR: {data.get('message')}")
+            async for chunk in gen:
+                try:
+                    data = json.loads(chunk.strip())
+                    status = data.get("status")
                     
-                # Final Output
-                if status == "complete":
-                    print("\n" + "="*50)
-                    print("✅ FINAL GENERATED REPORT:")
-                    print(data.get("final_report"))
-                    
-                    print("\n🔍 EXPLAINABILITY TRACE:")
-                    print(json.dumps(data.get("explainability"), indent=2))
-                    
-                    print("\n🖼️ EXPLAINABLE IMAGE SAVED AT:")
-                    print(data.get("explainable_image_path"))
-                    print("="*50 + "\n")
-                    
-            except Exception as e: 
-                print(f"⚠️ Chunk Error: {e}")
-                continue
+                    # Print live updates so we don't think it's frozen!
+                    if status != "complete" and status != "streaming":
+                        print(f" 🔄 {status.upper()}: {data.get('message', '')}")
+                    elif status == "error":
+                        print(f" ❌ ERROR: {data.get('message')}")
+                        
+                    # Final Output
+                    if status == "complete":
+                        
+                        # --- THE MOCK INJECTION (Remove this after testing!) ---
+                        print("\n💉 INJECTING FAKE DISEASES TO TEST BOUNDING BOXES...")
+                        fake_kg = {
+                            "entities": [
+                                ["cardiomegaly", "Observation"],
+                                ["mediastinum", "Anatomy"],
+                                ["pleural effusion", "Observation"],
+                                ["left lung", "Anatomy"]
+                            ],
+                            "relations": [
+                                [0, 1, "located_at"], # Cardiomegaly located_at Mediastinum
+                                [2, 3, "located_at"]  # Effusion located_at Left Lung
+                            ]
+                        }
+                        
+                        # Force the explainer to use our fake KG instead of the real one
+                        from explain import generate_explainable_image
+                        
+                        explain_dir = os.path.join("out", "explained_images")
+                        os.makedirs(explain_dir, exist_ok=True)
+                        parent_folder = os.path.basename(os.path.dirname(target_image))
+                        file_name = os.path.basename(target_image)
+                        new_filename = f"{parent_folder}_{file_name}".replace(".png", "_mock_explained.png").replace(".jpg", "_mock_explained.jpg")
+                        explain_img_path = os.path.join(explain_dir, new_filename)
+                        
+                        generate_explainable_image(target_image, fake_kg, explain_img_path)
+                        data["explainable_image_path"] = explain_img_path
+                        # --------------------------------------------------------
+
+                        print("\n" + "="*50)
+                        print("✅ FINAL GENERATED REPORT:")
+                        print(data.get("final_report"))
+                        
+                        print("\n🔍 EXPLAINABILITY TRACE (Show your work):")
+                        print(json.dumps(data.get("explainability"), indent=2))
+                        
+                        print("\n🖼️ EXPLAINABLE IMAGE SAVED AT:")
+                        print(data.get("explainable_image_path"))
+                        print("="*50 + "\n")
+                        
+                except Exception as e: 
+                    print(f"⚠️ Chunk Error: {e}")
+                    continue
+        else:
+            print("❌ Error: No valid image found.")
 
     asyncio.run(main_test())

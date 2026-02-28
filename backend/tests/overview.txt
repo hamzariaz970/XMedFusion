@@ -1,0 +1,189 @@
+XMedFusion – Testing Instructions
+=================================
+
+This document explains how to run all testing suites for the XMedFusion backend.
+
+Project Path
+------------
+cd /home/rapids/Desktop/XMedFusion/XMedFusion/backend
+
+
+--------------------------------------------------
+A) FUNCTIONAL TESTING
+--------------------------------------------------
+
+1) Unit Tests → tests/test_unit.py (30 tests)
+
+Test Classes & Coverage:
+
+• TestValidators
+  - validate_report
+  - Knowledge Graph contradiction detection
+  - Section extraction logic
+
+• TestExplain
+  - Zone parsing
+  - Heuristic placement
+  - Overlay image generation
+
+• TestDraftRetrieval
+  - RetrievalAgent
+  - truncate_report
+  - Empty dictionary handling
+
+• TestVisionEncoder
+  - BioMedCLIP encode_image
+  - BioMedCLIP encode_text
+  - L2 normalization
+  - Similarity ordering
+
+• TestXRayFilter
+  - Real X-ray passes
+  - Non-X-ray rejected
+  - Corrupt path handled gracefully
+
+• TestConfig
+  - Required config fields exist
+  - Temperature range validation
+
+
+Run Unit Tests:
+---------------
+pytest tests/test_unit.py -v
+
+
+
+2) Integration Tests → tests/test_integration.py (10 tests)
+
+Test Classes & Coverage:
+
+• TestVisionToExplainPipeline
+  - BioMedCLIP → findings → bounding box overlay
+  - Full visual explainability chain
+
+• TestFilterGateSynthesis
+  - Non-X-ray blocked before LLM
+  - Real X-ray proceeds to parallel_start
+
+• TestValidatorIntegration
+  - Contradiction detected
+  - Repair loop triggered
+
+• TestAnnotationIntegrity
+  - All 4138 annotation entries have:
+      - Valid reports
+      - Image paths existing on disk
+
+Run Integration Tests:
+----------------------
+pytest tests/test_integration.py -v
+
+
+
+3) System Tests → tests/test_system.py (12 tests)
+
+API Endpoint Coverage:
+
+• GET /api/health
+  - Returns status
+  - Required fields present
+  - GPU flag included
+  - Response time < 2 seconds
+
+• POST /api/synthesize-report (Real X-ray)
+  - NDJSON stream returned
+  - Contains final_report
+  - Contains knowledge_graph
+
+• POST /api/synthesize-report (Non-X-ray)
+  - Returns error status
+  - No "complete" chunk in stream
+
+• FastAPI TestClient
+  - No live server required for some tests
+
+
+Run System Tests:
+-----------------
+1) Start the API server first:
+   uvicorn app:app --host 127.0.0.1 --port 8000 &
+
+2) Then run:
+   pytest tests/test_system.py -v
+
+
+
+--------------------------------------------------
+B) NON-FUNCTIONAL TESTING
+--------------------------------------------------
+
+File: tests/test_nonfunctional.py (20 tests)
+
+
+1) Performance Tests
+
+• BioMedCLIP image encode < 500ms
+• Batch text encode (64 prompts) < 2s
+• X-ray filter inference < 500ms
+• Top-5 retrieval from 4K reports < 10s
+• Explainability overlay < 2s
+• GPU memory leak < 50MB after 5 filter calls
+
+
+2) Robustness / Boundary Tests
+
+• 1×1 pixel image
+• 4K image
+• Empty text
+• 500-word text
+• Grayscale image
+• RGBA image
+• k larger than dataset size
+• All-black image through hybrid scoring
+
+
+3) Security Tests
+
+• Upload HTML or empty file → no 500 crash
+• Missing file field → returns 422
+• CORS headers present
+• Path traversal filename (../../etc/passwd) → no crash
+• SQL injection in KG dict → validator handles gracefully
+• HTML/script in report text → no crash
+
+
+Run Non-Functional Tests:
+-------------------------
+pytest tests/test_nonfunctional.py -v
+
+
+
+--------------------------------------------------
+RUN ALL TESTS
+--------------------------------------------------
+
+pytest tests/ -v --tb=short
+
+
+
+--------------------------------------------------
+RECOMMENDED ORDER
+--------------------------------------------------
+
+1) Unit Tests (fastest)
+2) Integration Tests
+3) Non-Functional Tests
+4) System Tests (requires server running)
+
+This ensures fast debugging and isolation of issues before full pipeline validation.
+
+
+
+--------------------------------------------------
+NOTES
+--------------------------------------------------
+
+• Ensure GPU is available if performance tests rely on CUDA.
+• Make sure annotation image paths exist before running integration tests.
+• System tests require FastAPI server running on port 8000.
+• If using Ollama, ensure models are pulled and running before synthesis tests.
