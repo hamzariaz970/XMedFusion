@@ -6,9 +6,11 @@ import {
   StyleSheet,
   StatusBar,
   ScrollView,
-  Image,
+  Image as RNImage,
   ActivityIndicator,
+  Alert,
 } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
 import { 
   ImagePlus, 
   Camera, 
@@ -20,19 +22,20 @@ import {
   RotateCcw,
   ChevronUp,
   ChevronDown,
-  Info,
-  Scan,
   Search,
   Activity,
-  History
+  History,
+  AlertTriangle,
+  Lightbulb
 } from 'lucide-react-native';
 import { useTheme } from '../theme/ThemeContext';
 import { spacing, radius, typography, fontFamily } from '../theme/colors';
+import { uploadXRay, StreamChunk } from '../api/api';
 
 type AnalysisStep = {
   id: string;
   label: string;
-  status: 'pending' | 'running' | 'done';
+  status: 'pending' | 'running' | 'done' | 'error';
   icon: any;
 };
 
@@ -43,10 +46,10 @@ type ReportSection = {
 };
 
 const initialSteps: AnalysisStep[] = [
-  { id: 'visual', label: 'Visual Feature Extraction', status: 'pending', icon: Scan },
-  { id: 'rag', label: 'RAG Knowledge Retrieval', status: 'pending', icon: History },
-  { id: 'report', label: 'Report Generation (LLM)', status: 'pending', icon: FileText },
-  { id: 'verify', label: 'Clinical Verification', status: 'pending', icon: ShieldCheck },
+  { id: 'validating', label: 'Image Validation', status: 'pending', icon: ShieldCheck },
+  { id: 'agents', label: 'Multi-Agent Analysis', status: 'pending', icon: Zap },
+  { id: 'synthesis', label: 'Report Synthesis', status: 'pending', icon: FileText },
+  { id: 'verify', label: 'Final Verification', status: 'pending', icon: CheckCircle2 },
 ];
 
 export default function UploadAnalysisScreen() {
@@ -54,69 +57,115 @@ export default function UploadAnalysisScreen() {
   const [phase, setPhase] = useState<'idle' | 'analyzing' | 'done'>('idle');
   const [steps, setSteps] = useState<AnalysisStep[]>(initialSteps);
   const [imageUri, setImageUri] = useState<string | null>(null);
+  const [report, setReport] = useState<ReportSection[]>([]);
+  const [heatmap, setHeatmap] = useState<string | null>(null);
+  const [explainability, setExplainability] = useState<any>(null);
   const [expandedSection, setExpandedSection] = useState<string | null>('findings');
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const mockReport: ReportSection[] = [
-    {
-      title: 'Findings',
-      icon: Search,
-      content:
-        'Bilateral perihilar infiltrates are noted with increased opacity in the right lower lobe consistent with consolidation. The cardiomediastinal silhouette is mildly enlarged. No pneumothorax or significant pleural effusion identified.',
-    },
-    {
-      title: 'Impression',
-      icon: Activity,
-      content:
-        'Findings are consistent with bilateral pneumonia with early consolidative changes in the right lower lobe. Mild cardiomegaly noted. Clinical correlation recommended.',
-    },
-    {
-      title: 'Recommendations',
-      icon: ShieldCheck,
-      content:
-        '1. Start empirical antibiotic therapy.\n2. Repeat chest X-ray in 48-72 hours to assess response.\n3. Echocardiogram to evaluate cardiac function.\n4. Blood cultures and CBC with differential.',
-    },
-  ];
+  const pickImage = async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      quality: 0.8,
+    });
 
-  const simulateAnalysis = () => {
+    if (!result.canceled) {
+      handleUpload(result.assets[0].uri);
+    }
+  };
+
+  const takePhoto = async () => {
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission denied', 'We need camera access to take photos.');
+      return;
+    }
+
+    const result = await ImagePicker.launchCameraAsync({
+      allowsEditing: true,
+      quality: 0.8,
+    });
+
+    if (!result.canceled) {
+      handleUpload(result.assets[0].uri);
+    }
+  };
+
+  const handleUpload = async (uri: string) => {
+    setImageUri(uri);
     setPhase('analyzing');
-    const updatedSteps = [...initialSteps];
+    setSteps(initialSteps);
+    setErrorMessage(null);
+    setReport([]);
+    setHeatmap(null);
 
-    // Step 1
-    setTimeout(() => {
-      updatedSteps[0] = { ...updatedSteps[0], status: 'running' };
-      setSteps([...updatedSteps]);
-    }, 500);
-    setTimeout(() => {
-      updatedSteps[0] = { ...updatedSteps[0], status: 'done' };
-      updatedSteps[1] = { ...updatedSteps[1], status: 'running' };
-      setSteps([...updatedSteps]);
-    }, 2000);
-    setTimeout(() => {
-      updatedSteps[1] = { ...updatedSteps[1], status: 'done' };
-      updatedSteps[2] = { ...updatedSteps[2], status: 'running' };
-      setSteps([...updatedSteps]);
-    }, 3800);
-    setTimeout(() => {
-      updatedSteps[2] = { ...updatedSteps[2], status: 'done' };
-      updatedSteps[3] = { ...updatedSteps[3], status: 'running' };
-      setSteps([...updatedSteps]);
-    }, 6000);
-    setTimeout(() => {
-      updatedSteps[3] = { ...updatedSteps[3], status: 'done' };
-      setSteps([...updatedSteps]);
-      setPhase('done');
-    }, 7500);
+    await uploadXRay(uri, (chunk: StreamChunk) => {
+      setSteps(prev => {
+        const next = [...prev];
+        if (chunk.status === 'validating') {
+          next[0].status = 'running';
+        } else if (chunk.status === 'parallel_start') {
+          next[0].status = 'done';
+          next[1].status = 'running';
+        } else if (chunk.status === 'parallel_done') {
+          next[1].status = 'done';
+        } else if (chunk.status === 'synthesis_start') {
+          next[2].status = 'running';
+        } else if (chunk.status === 'complete') {
+          next[2].status = 'done';
+          next[3].status = 'done';
+        } else if (chunk.status === 'error') {
+          const runningIdx = next.findIndex(s => s.status === 'running');
+          if (runningIdx !== -1) next[runningIdx].status = 'error';
+          setErrorMessage(chunk.message || 'An unknown error occurred.');
+        }
+        return next;
+      });
+
+      if (chunk.final_report) {
+        // Parse unstructured or semi-structured report into sections
+        const sections: ReportSection[] = [];
+        const content = chunk.final_report;
+        
+        // Simple logic to extract sections if they exist, or just use one
+        if (content.includes('FINDINGS:')) {
+            const findings = content.split('FINDINGS:')[1].split('IMPRESSION:')[0].trim();
+            const impression = content.split('IMPRESSION:')[1]?.trim() || '';
+            sections.push({ title: 'Findings', content: findings, icon: Search });
+            sections.push({ title: 'Impression', content: impression, icon: Activity });
+        } else {
+            sections.push({ title: 'Analysis', content, icon: FileText });
+        }
+        
+        setReport(sections);
+        setPhase('done');
+      }
+
+      if (chunk.heatmap) {
+        setHeatmap(chunk.heatmap);
+      }
+
+      if (chunk.explainability) {
+          setExplainability(chunk.explainability);
+      }
+    });
   };
 
   const reset = () => {
     setPhase('idle');
     setSteps(initialSteps);
     setImageUri(null);
+    setReport([]);
+    setHeatmap(null);
+    setErrorMessage(null);
+    setExplainability(null);
   };
 
   const stepStatusColor = (status: AnalysisStep['status']) => {
     if (status === 'done') return theme.success;
     if (status === 'running') return theme.primary;
+    if (status === 'error') return theme.destructive;
     return theme.mutedForeground;
   };
 
@@ -134,7 +183,7 @@ export default function UploadAnalysisScreen() {
         {/* Upload Area */}
         {phase === 'idle' && (
           <>
-            <TouchableOpacity style={s.uploadBox} activeOpacity={0.75} onPress={simulateAnalysis}>
+            <TouchableOpacity style={s.uploadBox} activeOpacity={0.75} onPress={pickImage}>
               <ImagePlus color={theme.primary} size={48} strokeWidth={1.5} />
               <Text style={s.uploadTitle}>Tap to Select X-Ray</Text>
               <Text style={s.uploadSubtitle}>JPEG, PNG or DICOM · Max 20MB</Text>
@@ -146,67 +195,88 @@ export default function UploadAnalysisScreen() {
               <View style={s.orLine} />
             </View>
 
-            <TouchableOpacity style={s.cameraButton} onPress={simulateAnalysis}>
+            <TouchableOpacity style={s.cameraButton} onPress={takePhoto}>
                <Camera color={theme.foreground} size={20} style={{ marginRight: 8 }} />
                <Text style={s.cameraButtonText}>Capture with Camera</Text>
             </TouchableOpacity>
-
-            {/* Demo note */}
-            <View style={s.demoNote}>
-              <Info color={theme.primary} size={16} style={{ marginTop: 2 }} />
-              <Text style={s.demoNoteText}>
-                Tap either option above to preview the AI analysis flow with a demo report.
-              </Text>
-            </View>
           </>
         )}
 
         {/* Analysis In Progress */}
         {(phase === 'analyzing' || phase === 'done') && (
           <>
-            {/* X-Ray placeholder */}
-            <View style={s.xrayPlaceholder}>
-              <Scan color={theme.mutedForeground} size={48} strokeWidth={1} />
-              <Text style={s.xrayPlaceholderText}>Chest_PA_2847.jpg</Text>
+            {/* X-Ray Image */}
+            <View style={s.imageContainer}>
+              {heatmap ? (
+                  <RNImage source={{ uri: heatmap }} style={s.xrayImage} resizeMode="contain" />
+              ) : imageUri ? (
+                  <RNImage source={{ uri: imageUri }} style={s.xrayImage} resizeMode="contain" />
+              ) : (
+                <View style={s.xrayPlaceholder}>
+                   <ActivityIndicator color={theme.primary} />
+                </View>
+              )}
+              {heatmap && (
+                <View style={s.heatmapBadge}>
+                  <Lightbulb color={theme.primary} size={12} />
+                  <Text style={s.heatmapBadgeText}>AI Heatmap Active</Text>
+                </View>
+              )}
             </View>
+
+            {/* Error Message */}
+            {errorMessage && (
+              <View style={s.errorCard}>
+                <AlertTriangle color={theme.destructive} size={20} />
+                <View style={{ flex: 1 }}>
+                  <Text style={s.errorText}>{errorMessage}</Text>
+                  <TouchableOpacity onPress={reset} style={s.retryBtn}>
+                    <Text style={s.retryBtnText}>Try Again</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
 
             {/* Agent Steps */}
-            <View style={s.stepsCard}>
-              <View style={s.stepsHeader}>
-                {phase === 'done' ? (
-                   <CheckCircle2 color={theme.success} size={20} />
-                ) : (
-                   <Zap color={theme.primary} size={20} />
-                )}
-                <Text style={s.stepsTitle}>
-                  {phase === 'done' ? 'Analysis Complete' : 'Agentic Pipeline Running...'}
-                </Text>
-              </View>
-              {steps.map((step) => (
-                <View key={step.id} style={s.stepRow}>
-                  <View style={[s.stepDot, { backgroundColor: stepStatusColor(step.status) }]}>
-                    {step.status === 'running' && (
-                      <ActivityIndicator size="small" color={theme.backgroundDeep} />
-                    )}
-                    {step.status === 'done' && <CheckCircle2 color={theme.backgroundDeep} size={16} strokeWidth={3} />}
-                    {step.status === 'pending' && <View style={s.pendingInner} />}
-                  </View>
-                  <View style={s.stepIconWrapper}>
-                     <step.icon color={step.status === 'pending' ? theme.mutedForeground : theme.foreground} size={16} />
-                  </View>
-                  <Text style={s.stepLabel}>{step.label}</Text>
-                  <Text style={[s.stepStatus, { color: stepStatusColor(step.status) }]}>
-                    {step.status === 'done' ? 'Done' : step.status === 'running' ? 'Running' : '—'}
+            {!errorMessage && (
+              <View style={s.stepsCard}>
+                <View style={s.stepsHeader}>
+                  {phase === 'done' ? (
+                     <CheckCircle2 color={theme.success} size={20} />
+                  ) : (
+                     <Zap color={theme.primary} size={20} />
+                  )}
+                  <Text style={s.stepsTitle}>
+                    {phase === 'done' ? 'Analysis Complete' : 'Agentic Pipeline Running...'}
                   </Text>
                 </View>
-              ))}
-            </View>
+                {steps.map((step) => (
+                  <View key={step.id} style={s.stepRow}>
+                    <View style={[s.stepDot, { backgroundColor: stepStatusColor(step.status) }]}>
+                      {step.status === 'running' && (
+                        <ActivityIndicator size="small" color={theme.backgroundDeep} />
+                      )}
+                      {step.status === 'done' && <CheckCircle2 color={theme.backgroundDeep} size={16} strokeWidth={3} />}
+                      {step.status === 'error' && <AlertTriangle color={theme.backgroundDeep} size={16} />}
+                      {step.status === 'pending' && <View style={s.pendingInner} />}
+                    </View>
+                    <View style={s.stepIconWrapper}>
+                       <step.icon color={step.status === 'pending' ? theme.mutedForeground : theme.foreground} size={16} />
+                    </View>
+                    <Text style={s.stepLabel}>{step.label}</Text>
+                    <Text style={[s.stepStatus, { color: stepStatusColor(step.status) }]}>
+                      {step.status === 'done' ? 'Done' : step.status === 'running' ? 'Running' : step.status === 'error' ? 'Failed' : '—'}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            )}
 
             {/* Report Sections */}
-            {phase === 'done' && (
+            {phase === 'done' && report.length > 0 && (
               <>
                 <Text style={s.reportTitle}>Generated Report</Text>
-                {mockReport.map((section) => (
+                {report.map((section) => (
                   <TouchableOpacity
                     key={section.title}
                     style={s.reportSection}
@@ -231,6 +301,16 @@ export default function UploadAnalysisScreen() {
                     )}
                   </TouchableOpacity>
                 ))}
+
+                {/* Reasoning Trace */}
+                {explainability && (
+                    <View style={s.reasoningCard}>
+                        <Text style={s.reasoningTitle}>AI Reasoning Trace</Text>
+                        {explainability.reasoning_steps?.map((step: string, i: number) => (
+                           <Text key={i} style={s.reasoningStep}>{step}</Text>
+                        ))}
+                    </View>
+                )}
 
                 {/* Actions */}
                 <View style={s.actionRow}>
@@ -273,7 +353,6 @@ const styles = (theme: any) => StyleSheet.create({
     paddingVertical: spacing.xxl + spacing.lg,
     gap: spacing.sm,
   },
-  uploadIcon: { fontSize: 48 },
   uploadTitle: { color: theme.foreground, fontWeight: '600', fontSize: typography.lg, fontFamily: fontFamily.bold },
   uploadSubtitle: { color: theme.mutedForeground, fontSize: typography.sm, fontFamily: fontFamily.regular },
   orRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
@@ -290,27 +369,44 @@ const styles = (theme: any) => StyleSheet.create({
     justifyContent: 'center',
   },
   cameraButtonText: { color: theme.foreground, fontWeight: '600', fontSize: typography.base, fontFamily: fontFamily.bold },
-  demoNote: {
-    flexDirection: 'row',
-    backgroundColor: theme.primaryGlow,
-    borderWidth: 1,
-    borderColor: theme.primary,
-    borderRadius: radius.md,
-    padding: spacing.md,
-    gap: spacing.sm,
-  },
-  demoNoteText: { flex: 1, color: theme.primary, fontSize: typography.xs, lineHeight: 18, fontFamily: fontFamily.regular },
-  xrayPlaceholder: {
-    height: 180,
+  imageContainer: {
+    height: 220,
     backgroundColor: theme.backgroundDeep,
     borderRadius: radius.lg,
     borderWidth: 1,
     borderColor: theme.cardBorder,
+    overflow: 'hidden',
+    position: 'relative',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: spacing.sm,
   },
-  xrayPlaceholderText: { color: theme.mutedForeground, fontSize: typography.sm, fontFamily: fontFamily.medium },
+  xrayImage: { width: '100%', height: '100%' },
+  xrayPlaceholder: { alignItems: 'center', justifyContent: 'center' },
+  heatmapBadge: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: radius.full,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  heatmapBadgeText: { color: theme.primary, fontSize: 10, fontWeight: '600', fontFamily: fontFamily.semiBold },
+  errorCard: {
+    backgroundColor: theme.destructiveBg,
+    borderWidth: 1,
+    borderColor: theme.destructive,
+    borderRadius: radius.lg,
+    padding: spacing.md,
+    flexDirection: 'row',
+    gap: spacing.md,
+  },
+  errorText: { color: theme.destructive, fontSize: typography.sm, fontFamily: fontFamily.medium },
+  retryBtn: { marginTop: spacing.sm },
+  retryBtnText: { color: theme.foreground, fontSize: typography.sm, fontWeight: '700', textDecorationLine: 'underline' },
   stepsCard: {
     backgroundColor: theme.card,
     borderWidth: 1,
@@ -351,6 +447,16 @@ const styles = (theme: any) => StyleSheet.create({
     marginTop: spacing.md,
     fontFamily: fontFamily.regular,
   },
+  reasoningCard: {
+    backgroundColor: theme.primaryGlow,
+    borderWidth: 1,
+    borderColor: theme.primary,
+    borderRadius: radius.lg,
+    padding: spacing.md,
+    gap: spacing.sm,
+  },
+  reasoningTitle: { color: theme.primary, fontWeight: '700', fontSize: typography.sm, fontFamily: fontFamily.bold },
+  reasoningStep: { color: theme.foreground, fontSize: typography.xs, opacity: 0.9, lineHeight: 16, fontFamily: fontFamily.regular },
   actionRow: { flexDirection: 'row', gap: spacing.sm },
   actionBtn: {
     flex: 1,

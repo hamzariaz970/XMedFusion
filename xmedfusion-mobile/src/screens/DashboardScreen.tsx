@@ -85,8 +85,8 @@ export default function DashboardScreen() {
         <Text style={s.sectionTitle}>Quick Access</Text>
         <View style={s.quickActionsGrid}>
           {[
-            { label: 'Analyze Scan', icon: Zap, desc: 'Process new radiograph', color: theme.primary, target: 'Upload' },
-            { label: 'Case Library', icon: ClipboardList, desc: 'View previous reports', color: theme.accent, target: 'Patients' },
+            { label: 'Analyze Scan', icon: Zap, desc: 'Process new radiograph', color: theme.primary, glow: theme.primaryGlow, target: 'Upload' },
+            { label: 'Case Library', icon: ClipboardList, desc: 'View previous reports', color: theme.accent, glow: theme.accentGlow, target: 'Patients' },
           ].map((action) => (
             <TouchableOpacity 
               key={action.label} 
@@ -94,7 +94,7 @@ export default function DashboardScreen() {
               activeOpacity={0.8}
               onPress={() => navigation.navigate(action.target)}
             >
-              <View style={[s.actionIcon, { backgroundColor: action.color + '20' }]}>
+              <View style={[s.actionIcon, { backgroundColor: action.glow }]}>
                 <action.icon color={action.color} size={24} strokeWidth={2.5} />
               </View>
               <Text style={s.quickActionLabel}>{action.label}</Text>
@@ -166,8 +166,20 @@ const styles = (theme: any) => StyleSheet.create({
   sectionRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing.md },
   sectionTitle: { color: theme.foreground, fontSize: typography.lg, fontWeight: '600', marginBottom: spacing.md, fontFamily: fontFamily.semiBold },
   seeAll: { color: theme.primary, fontSize: typography.sm, fontFamily: fontFamily.medium },
-  quickActionsGrid: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.lg },
-  quickAction: { flex: 1, backgroundColor: theme.card, borderWidth: 1, borderColor: theme.cardBorder, borderRadius: radius.lg, padding: spacing.md },
+  quickActionsGrid: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.lg, alignItems: 'stretch' },
+  quickAction: { 
+    flex: 1, 
+    backgroundColor: theme.card, 
+    borderWidth: 1, 
+    borderColor: theme.cardBorder, 
+    borderRadius: radius.lg, 
+    padding: spacing.md,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3
+  },
   actionIcon: { width: 44, height: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center', marginBottom: spacing.sm },
   quickActionLabel: { color: theme.foreground, fontWeight: '600', fontSize: typography.sm, marginBottom: 2, fontFamily: fontFamily.semiBold },
   quickActionDesc: { color: theme.mutedForeground, fontSize: typography.xs, fontFamily: fontFamily.regular },

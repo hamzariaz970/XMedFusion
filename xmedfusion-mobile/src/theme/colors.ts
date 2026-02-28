@@ -14,6 +14,7 @@ export type ThemeColors = {
     primaryForeground: string;
     primaryGlow: string;
     accent: string;
+    accentGlow: string;
     accentForeground: string;
     border: string;
     cardBorder: string;
@@ -42,6 +43,7 @@ export const darkTheme: ThemeColors = {
     primaryForeground: 'hsl(210, 40%, 8%)',
     primaryGlow: 'rgba(14, 184, 212, 0.12)',
     accent: 'hsl(220, 70%, 60%)',
+    accentGlow: 'rgba(96, 136, 238, 0.15)',
     accentForeground: 'hsl(0, 0%, 100%)',
     border: 'hsl(210, 30%, 20%)',
     cardBorder: 'hsl(210, 30%, 20%)',
@@ -70,6 +72,7 @@ export const lightTheme: ThemeColors = {
     primaryForeground: 'hsl(0, 0%, 100%)',
     primaryGlow: 'rgba(14, 184, 180, 0.10)',
     accent: 'hsl(220, 70%, 55%)',
+    accentGlow: 'rgba(96, 136, 230, 0.10)',
     accentForeground: 'hsl(0, 0%, 100%)',
     border: 'hsl(210, 20%, 90%)',
     cardBorder: 'hsl(210, 20%, 88%)',

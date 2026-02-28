@@ -11,25 +11,37 @@ import {
   Hospital, 
   BadgeCheck, 
   MapPin,
-  Calendar
+  Calendar,
+  LogOut
 } from 'lucide-react-native';
 import { useTheme } from '../theme/ThemeContext';
 import { spacing, radius, typography, fontFamily } from '../theme/colors';
+import { useAuth } from '../theme/AuthContext';
 
 export default function ProfileScreen() {
   const navigation = useNavigation<any>();
   const { theme, isDark } = useTheme();
+  const { user, signOut } = useAuth();
   const s = styles(theme);
 
   const profile = {
-    name: 'Dr. Ahmad Riaz',
-    role: 'Senior Radiologist',
+    name: user?.email?.split('@')[0].replace('.', ' ').replace(/(^\w|\s\w)/g, m => m.toUpperCase()) || 'Dr. Ahmad Riaz',
+    role: user?.user_metadata?.role === 'admin' ? 'System Administrator' : 'Senior Radiologist',
     hospital: 'PKH General Hospital',
-    email: 'ahmad.riaz@xmedfusion.ai',
-    id: 'DR-99212',
-    memberSince: 'Oct 2024',
+    email: user?.email || 'ahmad.riaz@xmedfusion.ai',
+    id: user?.id?.substring(0, 8).toUpperCase() || 'DR-99212',
+    memberSince: user?.created_at ? new Date(user.created_at).toLocaleDateString('en-US', { month: 'short', year: 'numeric' }) : 'Oct 2024',
     location: 'Lahore, Pakistan',
-    specialization: 'Agentic AI Workflows'
+    specialization: user?.user_metadata?.role === 'admin' ? 'IT Operations' : 'Agentic AI Workflows'
+  };
+
+  const handleSignOut = async () => {
+    try {
+      await signOut();
+      // Navigation handled by AppNavigator
+    } catch (error: any) {
+      alert('Error signing out');
+    }
   };
 
   return (
@@ -89,6 +101,11 @@ export default function ProfileScreen() {
            </View>
         </View>
 
+        <TouchableOpacity style={s.signOutBtn} onPress={handleSignOut}>
+           <LogOut color={theme.destructive} size={20} />
+           <Text style={s.signOutText}>Sign Out of Session</Text>
+        </TouchableOpacity>
+
         <TouchableOpacity style={s.verifyDocsBtn} onPress={() => alert('Opening Secure Document Viewer...')}>
            <Text style={s.verifyText}>View Credentials & Verification Documents</Text>
         </TouchableOpacity>
@@ -130,6 +147,19 @@ const styles = (theme: any) => StyleSheet.create({
   itemLabel: { color: theme.mutedForeground, fontSize: typography.xs, fontFamily: fontFamily.regular, marginBottom: 2 },
   itemValue: { color: theme.foreground, fontSize: typography.sm, fontWeight: '600', fontFamily: fontFamily.semiBold },
 
+  signOutBtn: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    justifyContent: 'center', 
+    gap: 10, 
+    padding: spacing.md, 
+    backgroundColor: theme.destructiveBg, 
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: theme.destructive + '40'
+  },
+  signOutText: { color: theme.destructive, fontSize: typography.sm, fontWeight: '700', fontFamily: fontFamily.bold },
+  
   verifyDocsBtn: { alignItems: 'center', padding: spacing.md },
   verifyText: { color: theme.primary, fontSize: typography.sm, fontWeight: '600', fontFamily: fontFamily.semiBold, textDecorationLine: 'underline' },
 });

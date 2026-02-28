@@ -29,8 +29,11 @@ import SecurityScreen from './src/screens/SecurityScreen';
 
 const Stack = createNativeStackNavigator();
 
+import { useAuth } from './src/theme/AuthContext';
+
 function AppNavigator() {
   const { theme, isDark } = useTheme();
+  const { session, loading } = useAuth();
 
   const navTheme = {
     ...DefaultTheme,
@@ -43,22 +46,38 @@ function AppNavigator() {
     },
   };
 
+  if (loading) {
+    return (
+      <View style={{ flex: 1, backgroundColor: theme.backgroundDeep, justifyContent: 'center', alignItems: 'center' }}>
+        <ActivityIndicator color={theme.primary} size="large" />
+      </View>
+    );
+  }
+
   return (
     <NavigationContainer theme={navTheme}>
       <StatusBar style={isDark ? 'light' : 'dark'} />
-      <Stack.Navigator initialRouteName="Splash" screenOptions={{ headerShown: false }}>
-        <Stack.Screen name="Splash" component={SplashScreen} />
-        <Stack.Screen name="Login" component={LoginScreen} />
-        <Stack.Screen name="MainTabs" component={MainTabNavigator} />
-        <Stack.Screen name="Upload" component={UploadAnalysisScreen} />
-        <Stack.Screen name="ReportDetail" component={ReportDetailScreen} />
-        <Stack.Screen name="PatientDetail" component={PatientDetailScreen} />
-        <Stack.Screen name="Profile" component={ProfileScreen} />
-        <Stack.Screen name="Security" component={SecurityScreen} />
+      <Stack.Navigator screenOptions={{ headerShown: false }}>
+        {session ? (
+          <>
+            <Stack.Screen name="MainTabs" component={MainTabNavigator} />
+            <Stack.Screen name="Upload" component={UploadAnalysisScreen} />
+            <Stack.Screen name="ReportDetail" component={ReportDetailScreen} />
+            <Stack.Screen name="PatientDetail" component={PatientDetailScreen} />
+            <Stack.Screen name="Profile" component={ProfileScreen} />
+            <Stack.Screen name="Security" component={SecurityScreen} />
+          </>
+        ) : (
+          <>
+            <Stack.Screen name="Login" component={LoginScreen} />
+          </>
+        )}
       </Stack.Navigator>
     </NavigationContainer>
   );
 }
+
+import { AuthProvider } from './src/theme/AuthContext';
 
 export default function App() {
   const [fontsLoaded] = useFonts({
@@ -79,7 +98,9 @@ export default function App() {
 
   return (
     <ThemeProvider>
-      <AppNavigator />
+      <AuthProvider>
+        <AppNavigator />
+      </AuthProvider>
     </ThemeProvider>
   );
 }
