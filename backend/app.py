@@ -220,7 +220,7 @@ async def health():
     if _torch.cuda.is_available():
         result["gpu_name"] = _torch.cuda.get_device_name(0)
         result["gpu_memory_used_mb"] = round(_torch.cuda.memory_allocated(0) / (1024 ** 2))
-        result["gpu_memory_total_mb"] = round(_torch.cuda.get_device_properties(0).total_mem / (1024 ** 2))
+        result["gpu_memory_total_mb"] = round(_torch.cuda.get_device_properties(0).total_memory / (1024 ** 2))
     return result
 
 if __name__ == "__main__":

@@ -192,7 +192,8 @@ class TestRobustness:
         """Requesting more results than available should not crash."""
         from vision import vision_encoder
         from draft import RetrievalAgent
-        tiny_dict = {"/some/path.png": "Normal study."} * 1
+        # FIX: Removed the unsupported dict multiplication
+        tiny_dict = {"/some/path.png": "Normal study."}
         agent = RetrievalAgent(vision_encoder, k=1000)
         results = agent.retrieve_top_k(real_xray_path, tiny_dict)
         assert len(results) <= 1  # Can't return more than available

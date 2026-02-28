@@ -125,10 +125,11 @@ class TestFilterGateSynthesis:
         agent = LocalSynthesisAgent()
         retrieval = RetrievalAgent(vision_encoder, k=3)
 
+        # FIX: Use patch.object on the initialized agent instance for "llm"
         with patch("draft.LocalLLMReportAgent.generate_report", side_effect=fake_generate), \
              patch("vision.VisualDescriptionAgent.generate_description", side_effect=fake_describe), \
              patch("synthesis.LocalSynthesisAgent._clean_output", side_effect=lambda x: x), \
-             patch("synthesis.LocalSynthesisAgent.llm") as mock_llm:
+             patch.object(agent, "llm") as mock_llm:
 
             mock_llm.invoke.return_value = MagicMock(content="Normal study.")
 
@@ -177,13 +178,16 @@ class TestValidatorIntegration:
         assert not val["ok"]
 
         agent = LocalSynthesisAgent.__new__(LocalSynthesisAgent)
-        with patch.object(agent, "llm") as mock_llm:
-            mock_llm.invoke.return_value = MagicMock(
-                content="No pleural effusion is identified."
-            )
-            fixed = agent.repair_report(bad_report, val["errors"], "KG: effusion Absent")
-            assert isinstance(fixed, str)
-            assert len(fixed) > 0
+        
+        # FIX: Directly attach a mock since __init__ was skipped
+        agent.llm = MagicMock()
+        agent.llm.invoke.return_value = MagicMock(
+            content="No pleural effusion is identified."
+        )
+        
+        fixed = agent.repair_report(bad_report, val["errors"], "KG: effusion Absent")
+        assert isinstance(fixed, str)
+        assert len(fixed) > 0
 
 
 # ══════════════════════════════════════════════════════════════════

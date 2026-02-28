@@ -1,6 +1,5 @@
 import re
 
-
 REQUIRED_SECTIONS = ["FINDINGS", "IMPRESSION", "LABELS", "RECOMMENDATIONS"]
 
 def extract_section(text: str, name: str) -> str:
@@ -18,14 +17,19 @@ def kg_present_absent(kg_json: dict | None):
     present, absent = set(), set()
     if not kg_json or "entities" not in kg_json:
         return present, absent
+    
     for (text, label) in kg_json.get("entities", []):
         t = str(text).strip().lower()
+        l = str(label).strip().lower()  # Fix: Ensure label is lowercase for comparison
+        
         if not t:
             continue
-        if "absent" in label:
+        
+        if "absent" in l:
             absent.add(t)
-        elif "present" in label:
+        elif "present" in l:
             present.add(t)
+            
     return present, absent
 
 def validate_report(report: str, kg_json: dict | None):
@@ -50,7 +54,10 @@ def validate_report(report: str, kg_json: dict | None):
     # KG contradiction heuristic
     _, absent = kg_present_absent(kg_json)
     for ent in absent:
-        if ent in body and not re.search(rf"(no|without|absence of)\s+{re.escape(ent)}", body):
+        # Improved regex allows up to 2 intervening words (e.g., "no bilateral pleural effusion")
+        negation_pattern = rf"(no|without|absence of)\s+(?:\w+\s+){{0,2}}{re.escape(ent)}"
+        
+        if ent in body and not re.search(negation_pattern, body):
             errors.append(f"KG says '{ent}' ABSENT but report implies it's present.")
             break
 

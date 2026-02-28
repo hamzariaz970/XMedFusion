@@ -28,7 +28,7 @@ No API server or LLM required.
 | `TestConfig` | `config.py` | Required fields exist, temperature in [0, 2], BASE_URL is localhost |
 
 ```bash
-pytest tests/test_unit.py -v
+python -m pytest tests/test_unit.py -v
 ```
 
 ---
@@ -44,7 +44,7 @@ No LLM required. BioMedCLIP model must be loaded.
 | `TestAnnotationIntegrity` | All 4138 annotation entries have reports + image paths that exist on disk |
 
 ```bash
-pytest tests/test_integration.py -v
+python -m pytest tests/test_integration.py -v
 ```
 
 ---
@@ -55,10 +55,10 @@ pytest tests/test_integration.py -v
 ```bash
 # Terminal 1 — start server
 cd backend
-uvicorn app:app --host 127.0.0.1 --port 8000
+python -muvicorn app:app --host 127.0.0.1 --port 8000
 
 # Terminal 2 — run tests
-pytest tests/test_system.py -v
+python -m pytest tests/test_system.py -v
 ```
 
 | Class | Endpoint | What's Tested |
@@ -74,7 +74,7 @@ pytest tests/test_system.py -v
 
 ```bash
 # Most tests run without a server; server-dependent ones auto-skip
-pytest tests/test_nonfunctional.py -v
+python -m pytest tests/test_nonfunctional.py -v
 ```
 
 ### Performance Benchmarks
@@ -114,14 +114,14 @@ pytest tests/test_nonfunctional.py -v
 cd /home/rapids/Desktop/XMedFusion/XMedFusion/backend
 
 # All tests (skips server-dependent ones if server offline)
-pytest tests/ -v --tb=short
+python -m pytest tests/ -v --tb=short
 
 # Quick smoke-test (unit only, ~2 min)
-pytest tests/test_unit.py -v
+python -m pytest tests/test_unit.py -v
 
 # With coverage report
-pip install pytest-cov
-pytest tests/ --cov=. --cov-report=term-missing -v
+python -m pip install pytest-cov
+python -m pytest tests/ --cov=. --cov-report=term-missing -v
 ```
 
 ## Dependencies
