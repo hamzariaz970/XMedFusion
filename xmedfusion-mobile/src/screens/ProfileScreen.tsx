@@ -1,15 +1,15 @@
 import React from 'react';
 import { View, Text, StyleSheet, ScrollView, StatusBar, TouchableOpacity, Image } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
-import { 
-  ChevronLeft, 
-  Camera, 
-  Edit3, 
-  User, 
-  Mail, 
-  Briefcase, 
-  Hospital, 
-  BadgeCheck, 
+import {
+  ChevronLeft,
+  Camera,
+  Edit3,
+  User,
+  Mail,
+  Briefcase,
+  Hospital,
+  BadgeCheck,
   MapPin,
   Calendar,
   LogOut
@@ -47,7 +47,7 @@ export default function ProfileScreen() {
   return (
     <View style={s.container}>
       <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} />
-      
+
       {/* Header */}
       <View style={s.header}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
@@ -55,59 +55,62 @@ export default function ProfileScreen() {
         </TouchableOpacity>
         <Text style={s.headerTitle}>Public Profile</Text>
         <TouchableOpacity onPress={() => alert('Profile Editing coming soon.')}>
-           <Edit3 color={theme.primary} size={20} />
+          <Edit3 color={theme.primary} size={20} />
         </TouchableOpacity>
       </View>
 
       <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
         {/* Profile Header */}
         <View style={s.profileHeader}>
-           <View style={s.avatarWrapper}>
-              <View style={s.avatarRing}>
-                 <User color={theme.primary} size={50} strokeWidth={1} />
-              </View>
-              <TouchableOpacity style={s.cameraBtn} onPress={() => alert('Accessing Camera/Gallery...')}>
-                 <Camera color={theme.white} size={14} />
-              </TouchableOpacity>
-           </View>
-           <Text style={s.nameText}>{profile.name}</Text>
-           <View style={s.roleBadge}>
-              <BadgeCheck color={theme.primary} size={14} />
-              <Text style={s.roleText}>{profile.role}</Text>
-           </View>
+          <View style={s.avatarWrapper}>
+            <View style={s.avatarRing}>
+              <Image
+                source={{ uri: 'https://images.unsplash.com/photo-1612349317150-e413f6a5b16d?q=80&w=250&auto=format&fit=crop' }}
+                style={{ width: 90, height: 90, borderRadius: 45 }}
+              />
+            </View>
+            <TouchableOpacity style={s.cameraBtn} onPress={() => alert('Accessing Camera/Gallery...')}>
+              <Camera color={theme.white} size={14} />
+            </TouchableOpacity>
+          </View>
+          <Text style={s.nameText}>{profile.name}</Text>
+          <View style={s.roleBadge}>
+            <BadgeCheck color={theme.primary} size={14} />
+            <Text style={s.roleText}>{profile.role}</Text>
+          </View>
         </View>
 
         {/* Details Grid */}
         <View style={s.infoSection}>
-           <Text style={s.sectionTitle}>Account Information</Text>
-           <View style={s.infoCard}>
-              {[
-                { icon: Hospital, label: 'Institution', value: profile.hospital },
-                { icon: Mail, label: 'Work Email', value: profile.email },
-                { icon: Briefcase, label: 'Specialization', value: profile.specialization },
-                { icon: MapPin, label: 'Location', value: profile.location },
-                { icon: Calendar, label: 'Member Since', value: profile.memberSince },
-              ].map((item, ix) => (
-                <View key={ix} style={[s.infoRow, ix > 0 && s.infoRowBorder]}>
-                   <View style={s.iconCircle}>
-                      <item.icon color={theme.mutedForeground} size={18} />
-                   </View>
-                   <View>
-                      <Text style={s.itemLabel}>{item.label}</Text>
-                      <Text style={s.itemValue}>{item.value}</Text>
-                   </View>
+          <Text style={s.sectionTitle}>Account Information</Text>
+          <View style={s.infoCard}>
+            {[
+              { icon: Hospital, label: 'Institution', value: profile.hospital },
+              { icon: Mail, label: 'Work Email', value: profile.email },
+              { icon: Briefcase, label: 'Specialization', value: profile.specialization },
+              { icon: MapPin, label: 'Location', value: profile.location },
+              { icon: Calendar, label: 'Member Since', value: profile.memberSince },
+            ].map((item, ix) => (
+              <View key={ix} style={[s.infoRow, ix > 0 && s.infoRowBorder]}>
+                <View style={s.iconCircle}>
+                  <item.icon color={theme.mutedForeground} size={18} />
                 </View>
-              ))}
-           </View>
+                <View>
+                  <Text style={s.itemLabel}>{item.label}</Text>
+                  <Text style={s.itemValue}>{item.value}</Text>
+                </View>
+              </View>
+            ))}
+          </View>
         </View>
 
         <TouchableOpacity style={s.signOutBtn} onPress={handleSignOut}>
-           <LogOut color={theme.destructive} size={20} />
-           <Text style={s.signOutText}>Sign Out of Session</Text>
+          <LogOut color={theme.destructive} size={20} />
+          <Text style={s.signOutText}>Sign Out of Session</Text>
         </TouchableOpacity>
 
         <TouchableOpacity style={s.verifyDocsBtn} onPress={() => alert('Opening Secure Document Viewer...')}>
-           <Text style={s.verifyText}>View Credentials & Verification Documents</Text>
+          <Text style={s.verifyText}>View Credentials & Verification Documents</Text>
         </TouchableOpacity>
       </ScrollView>
     </View>
@@ -116,12 +119,12 @@ export default function ProfileScreen() {
 
 const styles = (theme: any) => StyleSheet.create({
   container: { flex: 1, backgroundColor: theme.background },
-  header: { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    justifyContent: 'space-between', 
-    paddingHorizontal: spacing.lg, 
-    paddingTop: spacing.xxl, 
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.xxl,
     paddingBottom: spacing.md,
     backgroundColor: theme.card,
     borderBottomWidth: 1,
@@ -129,7 +132,7 @@ const styles = (theme: any) => StyleSheet.create({
   },
   headerTitle: { color: theme.foreground, fontSize: typography.lg, fontWeight: '700', fontFamily: fontFamily.bold },
   scroll: { padding: spacing.lg, gap: spacing.xl, paddingBottom: spacing.xxl },
-  
+
   profileHeader: { alignItems: 'center', gap: 10, marginTop: spacing.md },
   avatarWrapper: { position: 'relative' },
   avatarRing: { width: 100, height: 100, borderRadius: 50, backgroundColor: theme.primaryGlow, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: theme.primary },
@@ -147,19 +150,19 @@ const styles = (theme: any) => StyleSheet.create({
   itemLabel: { color: theme.mutedForeground, fontSize: typography.xs, fontFamily: fontFamily.regular, marginBottom: 2 },
   itemValue: { color: theme.foreground, fontSize: typography.sm, fontWeight: '600', fontFamily: fontFamily.semiBold },
 
-  signOutBtn: { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    justifyContent: 'center', 
-    gap: 10, 
-    padding: spacing.md, 
-    backgroundColor: theme.destructiveBg, 
+  signOutBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    padding: spacing.md,
+    backgroundColor: theme.destructiveBg,
     borderRadius: radius.md,
     borderWidth: 1,
     borderColor: theme.destructive + '40'
   },
   signOutText: { color: theme.destructive, fontSize: typography.sm, fontWeight: '700', fontFamily: fontFamily.bold },
-  
+
   verifyDocsBtn: { alignItems: 'center', padding: spacing.md },
   verifyText: { color: theme.primary, fontSize: typography.sm, fontWeight: '600', fontFamily: fontFamily.semiBold, textDecorationLine: 'underline' },
 });

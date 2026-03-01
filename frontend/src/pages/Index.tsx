@@ -2,14 +2,16 @@ import { Layout } from "@/components/layout/Layout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Link } from "react-router-dom";
-import { 
-  Activity, 
-  Upload, 
-  Brain, 
-  FileText, 
-  Network, 
-  Shield, 
-  Zap, 
+import { useState, useEffect } from "react";
+import { supabase } from "@/lib/supabaseClient";
+import {
+  Activity,
+  Upload,
+  Brain,
+  FileText,
+  Network,
+  Shield,
+  Zap,
   Eye,
   ArrowRight,
   CheckCircle2,
@@ -87,6 +89,22 @@ const workflowSteps = [
 ];
 
 const Index = () => {
+  const [session, setSession] = useState<any>(null);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+    });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
   return (
     <Layout>
       {/* Hero Section */}
@@ -95,31 +113,31 @@ const Index = () => {
           <div className="absolute -top-40 -right-40 w-80 h-80 bg-primary/10 rounded-full blur-3xl animate-pulse-slow" />
           <div className="absolute -bottom-40 -left-40 w-80 h-80 bg-accent/10 rounded-full blur-3xl animate-pulse-slow" style={{ animationDelay: '2s' }} />
         </div>
-        
+
         <div className="container mx-auto px-4 relative">
           <div className="max-w-4xl mx-auto text-center">
             <div className="inline-flex items-center gap-2 bg-primary/10 text-primary px-4 py-2 rounded-full text-sm font-medium mb-6 animate-fade-in">
               <Activity className="w-4 h-4" />
               AI-Powered Medical Imaging Analysis
             </div>
-            
+
             <h1 className="text-4xl md:text-6xl lg:text-7xl font-bold text-foreground mb-6 animate-slide-up">
               Transparent AI for{" "}
               <span className="gradient-text">Radiology Reports</span>
             </h1>
-            
+
             <p className="text-lg md:text-xl text-muted-foreground max-w-2xl mx-auto mb-8 animate-slide-up" style={{ animationDelay: '0.1s' }}>
               An agentic AI framework generating clinically grounded reports from chest X-rays and CT images with full evidence linking and reduced hallucination.
             </p>
-            
+
             <div className="flex flex-col sm:flex-row items-center justify-center gap-4 animate-slide-up" style={{ animationDelay: '0.2s' }}>
-              <Link to="/upload">
+              <Link to={session ? "/upload" : "/login"}>
                 <Button variant="hero" size="xl">
                   <Upload className="w-5 h-5" />
-                  Upload X-ray
+                  Upload X-ray/CT Scan
                 </Button>
               </Link>
-              <Link to="/knowledge-graph">
+              <Link to={session ? "/knowledge-graph" : "/login"}>
                 <Button variant="outline" size="xl">
                   Explore Knowledge Graph
                   <ArrowRight className="w-5 h-5" />
@@ -164,7 +182,7 @@ const Index = () => {
               <p className="text-muted-foreground mb-6">
                 XMedAgent combines state-of-the-art deep learning with clinical knowledge graphs to generate radiology reports that are not only accurate but fully traceable. Every diagnostic claim is verified against image-derived evidence.
               </p>
-              
+
               <ul className="space-y-4">
                 {[
                   "Multi-agent architecture for comprehensive analysis",
@@ -179,7 +197,7 @@ const Index = () => {
                 ))}
               </ul>
             </div>
-            
+
             <div className="relative">
               <div className="aspect-square rounded-3xl bg-gradient-to-br from-primary/20 to-accent/20 p-8 flex items-center justify-center">
                 <div className="grid grid-cols-2 gap-4 w-full">
@@ -219,7 +237,7 @@ const Index = () => {
               Simple <span className="text-primary">Workflow</span>
             </h3>
           </div>
-          
+
           <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
             {workflowSteps.map((step, index) => (
               <Card key={index} className="glass-card border-0 overflow-hidden group hover:shadow-card-hover transition-all duration-300">
@@ -246,7 +264,7 @@ const Index = () => {
               Powered by <span className="text-primary">Advanced AI</span>
             </h3>
           </div>
-          
+
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
             {features.map((feature, index) => (
               <Card key={index} className="group hover:shadow-card-hover transition-all duration-300 border-border/50 hover:border-primary/30">
@@ -274,15 +292,15 @@ const Index = () => {
               Upload your first X-ray and experience the power of evidence-linked AI report generation.
             </p>
             <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-              <Link to="/upload">
+              <Link to={session ? "/upload" : "/login"}>
                 <Button variant="glass" size="xl" className="bg-primary-foreground text-primary hover:bg-primary-foreground/90">
                   <Upload className="w-5 h-5" />
-                  Get Started Now
+                  Upload X-ray/CT Scan
                 </Button>
               </Link>
-              <Link to="/knowledge-graph">
+              <Link to={session ? "/knowledge-graph" : "/login"}>
                 <Button variant="outline" size="xl" className="border-primary-foreground/30 text-primary-foreground hover:bg-primary-foreground/10">
-                  View Knowledge Graph
+                  Explore Knowledge Graph
                 </Button>
               </Link>
             </div>

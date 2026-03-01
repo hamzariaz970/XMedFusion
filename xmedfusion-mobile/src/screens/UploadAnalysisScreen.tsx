@@ -11,16 +11,23 @@ import {
   Alert,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
-import { 
-  ImagePlus, 
-  Camera, 
-  Zap, 
-  FileText, 
-  CheckCircle2, 
+import * as Print from 'expo-print';
+import * as Sharing from 'expo-sharing';
+import { useNavigation } from '@react-navigation/native';
+import { useReportStore } from '../store/reportStore';
+import Svg, { Circle, Line, Text as SvgText, G } from 'react-native-svg';
+import { calculateLayout, nodeTypeColors } from './KnowledgeGraphScreen';
+import {
+  ImagePlus,
+  Camera,
+  Zap,
+  FileText,
+  CheckCircle2,
   ShieldCheck,
   Share,
   RotateCcw,
   ChevronUp,
+  ChevronLeft,
   ChevronDown,
   Search,
   Activity,
@@ -53,6 +60,7 @@ const initialSteps: AnalysisStep[] = [
 ];
 
 export default function UploadAnalysisScreen() {
+  const navigation = useNavigation<any>();
   const { theme, isDark } = useTheme();
   const [phase, setPhase] = useState<'idle' | 'analyzing' | 'done'>('idle');
   const [steps, setSteps] = useState<AnalysisStep[]>(initialSteps);
@@ -62,6 +70,98 @@ export default function UploadAnalysisScreen() {
   const [explainability, setExplainability] = useState<any>(null);
   const [expandedSection, setExpandedSection] = useState<string | null>('findings');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [rawKgData, setRawKgData] = useState<any>(null);
+
+  const addReport = useReportStore((state) => state.addReport);
+
+  const exportPdf = async () => {
+    if (report.length === 0) return;
+    try {
+
+      let svgHtml = '';
+      if (rawKgData && rawKgData.entities) {
+        const width = 600;
+        const height = 600;
+        const nodes = calculateLayout(rawKgData.entities, width);
+        const links = rawKgData.relations.map(([s, t, l]: any) => {
+          const src = nodes.find(n => n.id === s.toString());
+          const tgt = nodes.find(n => n.id === t.toString());
+          return { src, tgt, label: l };
+        });
+        const cols = nodeTypeColors({ primary: '#2563eb', white: '#fff', mutedForeground: '#9ca3af' });
+
+        let linksHtml = links.map((l: any) => {
+          if (!l.src || !l.tgt) return '';
+          return `
+                  <line x1="${l.src.x}" y1="${l.src.y}" x2="${l.tgt.x}" y2="${l.tgt.y}" stroke="#cbd5e1" stroke-width="1.5" opacity="0.4" />
+                  <text x="${(l.src.x + l.tgt.x) / 2}" y="${(l.src.y + l.tgt.y) / 2 - 5}" fill="#9ca3af" font-size="9" text-anchor="middle" font-family="sans-serif">${l.label}</text>
+              `;
+        }).join('');
+
+        let nodesHtml = nodes.map(n => {
+          const c = (cols as any)[n.type] || cols.uncertain;
+          return `
+                  <g transform="translate(${n.x}, ${n.y})">
+                     <circle r="22" fill="#ffffff" stroke="#e2e8f0" stroke-width="2" />
+                     <circle r="16" fill="${c.bg}" opacity="0.2" />
+                     <text y="35" fill="#1f2937" font-size="10" font-weight="600" text-anchor="middle" font-family="sans-serif">${n.label.length > 15 ? n.label.substring(0, 15) + '...' : n.label}</text>
+                  </g>
+              `;
+        }).join('');
+
+        svgHtml = `
+            <div class="section">
+                <div class="section-title">Knowledge Graph Visualization</div>
+                <div style="width: 100%; overflow-x: auto; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; text-align: center;">
+                   <svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">
+                      ${linksHtml}
+                      ${nodesHtml}
+                   </svg>
+                </div>
+            </div>
+          `;
+      }
+
+      let htmlContent = `
+        <html>
+          <head>
+            <style>
+              body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; padding: 40px; color: #111; }
+              h1 { color: #2563eb; font-size: 26px; border-bottom: 2px solid #e5e7eb; padding-bottom: 10px; }
+              .section { margin-top: 24px; }
+              .section-title { font-size: 18px; font-weight: bold; color: #1e40af; margin-bottom: 8px; text-transform: uppercase; }
+              .content { font-size: 15px; line-height: 1.6; color: #374151; white-space: pre-wrap; }
+              .footer { margin-top: 50px; font-size: 12px; color: #9ca3af; text-align: center; border-top: 1px solid #e5e7eb; padding-top: 20px; }
+            </style>
+          </head>
+          <body>
+            <h1>XMedFusion Medical Report</h1>
+            <p><strong>Date Generated:</strong> ${new Date().toLocaleString()}</p>
+      `;
+
+      report.forEach(sec => {
+        htmlContent += `
+           <div class="section">
+             <div class="section-title">${sec.title}</div>
+             <div class="content">${sec.content}</div>
+           </div>
+         `;
+      });
+
+      htmlContent += svgHtml;
+
+      htmlContent += `
+            <div class="footer">Analysis strictly provided by XMedFusion AI. For informational purposes only.</div>
+          </body>
+        </html>
+      `;
+
+      const { uri } = await Print.printToFileAsync({ html: htmlContent });
+      await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
+    } catch (e) {
+      Alert.alert('Export Error', 'Failed to generate and share PDF.');
+    }
+  };
 
   const pickImage = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -99,6 +199,7 @@ export default function UploadAnalysisScreen() {
     setErrorMessage(null);
     setReport([]);
     setHeatmap(null);
+    setRawKgData(null);
 
     await uploadXRay(uri, (chunk: StreamChunk) => {
       setSteps(prev => {
@@ -115,6 +216,23 @@ export default function UploadAnalysisScreen() {
         } else if (chunk.status === 'complete') {
           next[2].status = 'done';
           next[3].status = 'done';
+
+          let findingsText = '';
+          let impressionText = chunk.final_report || '';
+          if (impressionText.includes('FINDINGS:')) {
+            findingsText = impressionText.split('FINDINGS:')[1].split('IMPRESSION:')[0].trim();
+            impressionText = impressionText.split('IMPRESSION:')[1]?.trim() || '';
+          }
+
+          addReport({
+            id: Math.random().toString(36).substr(2, 9),
+            patientId: 'PT-' + Math.floor(1000 + Math.random() * 9000),
+            date: new Date().toISOString(),
+            findings: findingsText,
+            impression: impressionText,
+            knowledgeGraph: chunk.knowledge_graph
+          });
+          setRawKgData(chunk.knowledge_graph);
         } else if (chunk.status === 'error') {
           const runningIdx = next.findIndex(s => s.status === 'running');
           if (runningIdx !== -1) next[runningIdx].status = 'error';
@@ -127,17 +245,17 @@ export default function UploadAnalysisScreen() {
         // Parse unstructured or semi-structured report into sections
         const sections: ReportSection[] = [];
         const content = chunk.final_report;
-        
+
         // Simple logic to extract sections if they exist, or just use one
         if (content.includes('FINDINGS:')) {
-            const findings = content.split('FINDINGS:')[1].split('IMPRESSION:')[0].trim();
-            const impression = content.split('IMPRESSION:')[1]?.trim() || '';
-            sections.push({ title: 'Findings', content: findings, icon: Search });
-            sections.push({ title: 'Impression', content: impression, icon: Activity });
+          const findings = content.split('FINDINGS:')[1].split('IMPRESSION:')[0].trim();
+          const impression = content.split('IMPRESSION:')[1]?.trim() || '';
+          sections.push({ title: 'Findings', content: findings, icon: Search });
+          sections.push({ title: 'Impression', content: impression, icon: Activity });
         } else {
-            sections.push({ title: 'Analysis', content, icon: FileText });
+          sections.push({ title: 'Analysis', content, icon: FileText });
         }
-        
+
         setReport(sections);
         setPhase('done');
       }
@@ -147,7 +265,7 @@ export default function UploadAnalysisScreen() {
       }
 
       if (chunk.explainability) {
-          setExplainability(chunk.explainability);
+        setExplainability(chunk.explainability);
       }
     });
   };
@@ -160,6 +278,7 @@ export default function UploadAnalysisScreen() {
     setHeatmap(null);
     setErrorMessage(null);
     setExplainability(null);
+    setRawKgData(null);
   };
 
   const stepStatusColor = (status: AnalysisStep['status']) => {
@@ -175,8 +294,13 @@ export default function UploadAnalysisScreen() {
     <View style={s.container}>
       <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor={theme.backgroundDeep} />
       <View style={s.header}>
-        <Text style={s.title}>X-Ray Analysis</Text>
-        <Text style={s.subtitle}>AI-powered radiology report generation</Text>
+        <TouchableOpacity style={s.backBtn} onPress={() => navigation.goBack()}>
+          <ChevronLeft color={theme.foreground} size={28} />
+        </TouchableOpacity>
+        <View>
+          <Text style={s.title}>X-Ray Analysis</Text>
+          <Text style={s.subtitle}>AI-powered radiology report generation</Text>
+        </View>
       </View>
 
       <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
@@ -196,8 +320,8 @@ export default function UploadAnalysisScreen() {
             </View>
 
             <TouchableOpacity style={s.cameraButton} onPress={takePhoto}>
-               <Camera color={theme.foreground} size={20} style={{ marginRight: 8 }} />
-               <Text style={s.cameraButtonText}>Capture with Camera</Text>
+              <Camera color={theme.foreground} size={20} style={{ marginRight: 8 }} />
+              <Text style={s.cameraButtonText}>Capture with Camera</Text>
             </TouchableOpacity>
           </>
         )}
@@ -208,12 +332,12 @@ export default function UploadAnalysisScreen() {
             {/* X-Ray Image */}
             <View style={s.imageContainer}>
               {heatmap ? (
-                  <RNImage source={{ uri: heatmap }} style={s.xrayImage} resizeMode="contain" />
+                <RNImage source={{ uri: heatmap }} style={s.xrayImage} resizeMode="contain" />
               ) : imageUri ? (
-                  <RNImage source={{ uri: imageUri }} style={s.xrayImage} resizeMode="contain" />
+                <RNImage source={{ uri: imageUri }} style={s.xrayImage} resizeMode="contain" />
               ) : (
                 <View style={s.xrayPlaceholder}>
-                   <ActivityIndicator color={theme.primary} />
+                  <ActivityIndicator color={theme.primary} />
                 </View>
               )}
               {heatmap && (
@@ -242,9 +366,9 @@ export default function UploadAnalysisScreen() {
               <View style={s.stepsCard}>
                 <View style={s.stepsHeader}>
                   {phase === 'done' ? (
-                     <CheckCircle2 color={theme.success} size={20} />
+                    <CheckCircle2 color={theme.success} size={20} />
                   ) : (
-                     <Zap color={theme.primary} size={20} />
+                    <Zap color={theme.primary} size={20} />
                   )}
                   <Text style={s.stepsTitle}>
                     {phase === 'done' ? 'Analysis Complete' : 'Agentic Pipeline Running...'}
@@ -261,7 +385,7 @@ export default function UploadAnalysisScreen() {
                       {step.status === 'pending' && <View style={s.pendingInner} />}
                     </View>
                     <View style={s.stepIconWrapper}>
-                       <step.icon color={step.status === 'pending' ? theme.mutedForeground : theme.foreground} size={16} />
+                      <step.icon color={step.status === 'pending' ? theme.mutedForeground : theme.foreground} size={16} />
                     </View>
                     <Text style={s.stepLabel}>{step.label}</Text>
                     <Text style={[s.stepStatus, { color: stepStatusColor(step.status) }]}>
@@ -291,9 +415,9 @@ export default function UploadAnalysisScreen() {
                         <Text style={s.reportSectionTitle}>{section.title}</Text>
                       </View>
                       {expandedSection === section.title ? (
-                         <ChevronUp color={theme.mutedForeground} size={18} />
+                        <ChevronUp color={theme.mutedForeground} size={18} />
                       ) : (
-                         <ChevronDown color={theme.mutedForeground} size={18} />
+                        <ChevronDown color={theme.mutedForeground} size={18} />
                       )}
                     </View>
                     {expandedSection === section.title && (
@@ -304,17 +428,86 @@ export default function UploadAnalysisScreen() {
 
                 {/* Reasoning Trace */}
                 {explainability && (
-                    <View style={s.reasoningCard}>
-                        <Text style={s.reasoningTitle}>AI Reasoning Trace</Text>
-                        {explainability.reasoning_steps?.map((step: string, i: number) => (
-                           <Text key={i} style={s.reasoningStep}>{step}</Text>
-                        ))}
-                    </View>
+                  <View style={s.reasoningCard}>
+                    <Text style={s.reasoningTitle}>AI Reasoning Trace</Text>
+                    {explainability.reasoning_steps?.map((step: string, i: number) => (
+                      <Text key={i} style={s.reasoningStep}>{step}</Text>
+                    ))}
+                  </View>
                 )}
+
+                {/* Knowledge Graph Inline View */}
+                {rawKgData && rawKgData.entities && (() => {
+                  const width = 600;
+                  const height = 500;
+                  const nodes = calculateLayout(rawKgData.entities, width);
+                  const links = rawKgData.relations.map(([s, t, l]: any) => ({
+                    source: Math.max(0, Math.min(s, nodes.length - 1)).toString(),
+                    target: Math.max(0, Math.min(t, nodes.length - 1)).toString(),
+                    label: l
+                  }));
+                  const cols = nodeTypeColors(theme);
+                  return (
+                    <View style={s.kgContainer}>
+                      <Text style={s.kgTitle}>Knowledge Graph</Text>
+                      <View style={s.kgCanvasWrapper}>
+                        <ScrollView horizontal showsHorizontalScrollIndicator={true}>
+                          <Svg width={width + 50} height={height} viewBox={`0 0 ${width + 50} ${height}`}>
+                            {links.map((link: any, idx: number) => {
+                              const srcNode = nodes.find(n => n.id === link.source);
+                              const tgtNode = nodes.find(n => n.id === link.target);
+                              if (!srcNode || !tgtNode) return null;
+                              return (
+                                <G key={`link-${idx}`}>
+                                  <Line
+                                    x1={srcNode.x} y1={srcNode.y}
+                                    x2={tgtNode.x} y2={tgtNode.y}
+                                    stroke={theme.border}
+                                    strokeWidth={1.5}
+                                    opacity={0.3}
+                                  />
+                                  <SvgText
+                                    x={(srcNode.x + tgtNode.x) / 2}
+                                    y={(srcNode.y + tgtNode.y) / 2 - 5}
+                                    fill={theme.mutedForeground}
+                                    fontSize={9}
+                                    textAnchor="middle"
+                                    fontFamily={fontFamily.regular}
+                                  >
+                                    {link.label}
+                                  </SvgText>
+                                </G>
+                              );
+                            })}
+                            {nodes.map((node: any) => {
+                              const tColor = (cols as any)[node.type] || cols.uncertain;
+                              return (
+                                <G key={`node-${node.id}`} x={node.x} y={node.y}>
+                                  <Circle r={22} fill={theme.card} stroke={theme.border} strokeWidth={2} />
+                                  <Circle r={14} fill={tColor.fill} />
+                                  <SvgText
+                                    y={36}
+                                    fill={theme.foreground}
+                                    fontSize={10}
+                                    fontWeight="600"
+                                    textAnchor="middle"
+                                    fontFamily={fontFamily.semiBold}
+                                  >
+                                    {node.label.length > 15 ? node.label.substring(0, 15) + '...' : node.label}
+                                  </SvgText>
+                                </G>
+                              );
+                            })}
+                          </Svg>
+                        </ScrollView>
+                      </View>
+                    </View>
+                  );
+                })()}
 
                 {/* Actions */}
                 <View style={s.actionRow}>
-                  <TouchableOpacity style={s.actionBtn}>
+                  <TouchableOpacity style={s.actionBtn} onPress={exportPdf}>
                     <Share color={theme.primaryForeground} size={18} style={{ marginRight: 8 }} />
                     <Text style={s.actionBtnText}>Export PDF</Text>
                   </TouchableOpacity>
@@ -338,6 +531,19 @@ const styles = (theme: any) => StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.xxl,
     paddingBottom: spacing.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+  },
+  backBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: theme.card,
+    borderWidth: 1,
+    borderColor: theme.cardBorder,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   title: { color: theme.foreground, fontSize: typography['2xl'], fontWeight: '700', fontFamily: fontFamily.bold },
   subtitle: { color: theme.mutedForeground, fontSize: typography.sm, marginTop: 2, fontFamily: fontFamily.regular },
@@ -474,4 +680,14 @@ const styles = (theme: any) => StyleSheet.create({
     borderColor: theme.cardBorder,
   },
   actionBtnSecondaryText: { color: theme.foreground, fontWeight: '600', fontSize: typography.sm, fontFamily: fontFamily.semiBold },
+  kgContainer: {
+    backgroundColor: theme.card,
+    borderWidth: 1,
+    borderColor: theme.cardBorder,
+    borderRadius: radius.lg,
+    padding: spacing.md,
+    gap: spacing.sm,
+  },
+  kgTitle: { color: theme.foreground, fontWeight: '700', fontSize: typography.base, fontFamily: fontFamily.bold, marginBottom: spacing.xs },
+  kgCanvasWrapper: { height: 350, backgroundColor: theme.backgroundDeep, borderRadius: radius.md, borderWidth: 1, borderColor: theme.border, overflow: 'hidden' },
 });

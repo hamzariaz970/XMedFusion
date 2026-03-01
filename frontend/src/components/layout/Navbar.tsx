@@ -16,15 +16,16 @@ import {
 import { useState, useEffect } from "react";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/lib/supabaseClient";
+import { usePatientContext } from "@/context/PatientContext";
 
 const navItems = [
-  { path: "/", label: "Home", icon: Activity },
-  { path: "/upload", label: "Upload X-ray", icon: Upload },
-  { path: "/explainability", label: "Explainability", icon: FileSearch },
-  { path: "/knowledge-graph", label: "Knowledge Graph", icon: Network },
-  { path: "/patients", label: "Patients", icon: Users },
+  { path: "/", label: "Home", icon: Activity, requiresAuth: false, requiresPatient: false },
+  { path: "/patients", label: "Patients", icon: Users, requiresAuth: true, requiresPatient: false },
+  { path: "/upload", label: "Upload", icon: Upload, requiresAuth: true, requiresPatient: true },
+  { path: "/explainability", label: "Explainability", icon: FileSearch, requiresAuth: true, requiresPatient: true },
+  { path: "/knowledge-graph", label: "Knowledge Graph", icon: Network, requiresAuth: true, requiresPatient: true },
 
-  //{ path: "/image-mapping", label: "Image Mapping", icon: FileImage },
+  //{ path: "/image-mapping", label: "Image Mapping", icon: FileImage, requiresAuth: true, requiresPatient: true },
 ];
 
 export const Navbar = () => {
@@ -32,6 +33,7 @@ export const Navbar = () => {
   const navigate = useNavigate();
   const [isOpen, setIsOpen] = useState(false);
   const [session, setSession] = useState<any>(null);
+  const { selectedPatient, setSelectedPatient } = usePatientContext();
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -48,6 +50,7 @@ export const Navbar = () => {
   }, []);
 
   const handleSignOut = async () => {
+    setSelectedPatient(null);
     await supabase.auth.signOut();
     navigate("/login");
   };
@@ -68,36 +71,44 @@ export const Navbar = () => {
 
           {/* Desktop Navigation */}
           <div className="hidden md:flex items-center gap-1">
-            {navItems.map((item) => (
-              <Link key={item.path} to={item.path}>
-                <Button
-                  variant={
-                    location.pathname === item.path ? "default" : "ghost"
-                  }
-                  size="sm"
-                  className={cn(
-                    "gap-2",
-                    location.pathname === item.path && "shadow-glow"
-                  )}
-                >
-                  <item.icon className="w-4 h-4" />
-                  {item.label}
-                </Button>
-              </Link>
-            ))}
+            {navItems
+              .filter(item => {
+                const passesAuth = !item.requiresAuth || session;
+                const passesPatient = !item.requiresPatient || selectedPatient;
+                return passesAuth && passesPatient;
+              })
+              .map((item) => (
+                <Link key={item.path} to={item.path}>
+                  <Button
+                    variant={
+                      location.pathname === item.path ? "default" : "ghost"
+                    }
+                    size="sm"
+                    className={cn(
+                      "gap-2",
+                      location.pathname === item.path && "shadow-glow"
+                    )}
+                  >
+                    <item.icon className="w-4 h-4" />
+                    {item.label}
+                  </Button>
+                </Link>
+              ))}
           </div>
 
           <div className="hidden md:flex items-center gap-2">
-            <Link to="/admin">
-              <Button
-                variant={location.pathname === "/admin" ? "default" : "ghost"}
-                size="sm"
-                className="gap-2"
-              >
-                <ShieldCheck className="w-4 h-4" />
-                Admin
-              </Button>
-            </Link>
+            {session && (
+              <Link to="/admin">
+                <Button
+                  variant={location.pathname === "/admin" ? "default" : "ghost"}
+                  size="sm"
+                  className="gap-2"
+                >
+                  <ShieldCheck className="w-4 h-4" />
+                  Admin
+                </Button>
+              </Link>
+            )}
             {session ? (
               <Button variant="outline" size="sm" className="gap-2" onClick={handleSignOut}>
                 <LogOut className="w-4 h-4" />
@@ -128,23 +139,29 @@ export const Navbar = () => {
         {isOpen && (
           <div className="md:hidden py-4 animate-slide-up">
             <div className="flex flex-col gap-2">
-              {navItems.map((item) => (
-                <Link
-                  key={item.path}
-                  to={item.path}
-                  onClick={() => setIsOpen(false)}
-                >
-                  <Button
-                    variant={
-                      location.pathname === item.path ? "default" : "ghost"
-                    }
-                    className="w-full justify-start gap-2"
+              {navItems
+                .filter(item => {
+                  const passesAuth = !item.requiresAuth || session;
+                  const passesPatient = !item.requiresPatient || selectedPatient;
+                  return passesAuth && passesPatient;
+                })
+                .map((item) => (
+                  <Link
+                    key={item.path}
+                    to={item.path}
+                    onClick={() => setIsOpen(false)}
                   >
-                    <item.icon className="w-4 h-4" />
-                    {item.label}
-                  </Button>
-                </Link>
-              ))}
+                    <Button
+                      variant={
+                        location.pathname === item.path ? "default" : "ghost"
+                      }
+                      className="w-full justify-start gap-2"
+                    >
+                      <item.icon className="w-4 h-4" />
+                      {item.label}
+                    </Button>
+                  </Link>
+                ))}
             </div>
           </div>
         )}
