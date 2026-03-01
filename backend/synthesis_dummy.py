@@ -83,8 +83,10 @@ class LocalSynthesisAgent:
         
         Rewrite the report to fix ALL issues.
         Rules:
-        - Output a SINGLE concise paragraph (IU X-ray style).
-        - No headers (e.g. "Revised Report:", "Corrected Report:").
+        - Output concise clinical text (IU X-ray style).
+        - MUST use these headers:
+          FINDINGS:
+          IMPRESSION:
         - START DIRECTLY with the medical text.
         
         Report to fix:
@@ -200,7 +202,9 @@ class LocalSynthesisAgent:
         - **PRIMARY SOURCE:** Trust VISUAL ANALYSIS and FACTS for what is actually present.
         - **STYLE ONLY:** Use STYLE REFERENCE only for phrasing, NOT for medical findings.
         - **NORMALITY:** If Visual Analysis says "Normal" or "Clear", write a NORMAL report, ignoring any diseases in the Style Reference.
-        - **FORMAT:** A single concise paragraph. No headers.
+        - **FORMAT:** You MUST output the report with the following exact headers:
+          FINDINGS:
+          IMPRESSION:
         
         REPORT:
         """

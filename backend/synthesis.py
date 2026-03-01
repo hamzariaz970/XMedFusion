@@ -71,6 +71,7 @@ class LocalSynthesisAgent:
         self.llm = ChatOllama(
             model=model_name, 
             temperature=config.TEMPERATURE,
+            keep_alive=3600,  # Keep model hot in VRAM for 1 hour
             # CRITICAL SAFETY: Stop markers
             stop=["<|endoftext|>", "RECOMMENDATIONS:", "\n\n\n\n"] 
         )
@@ -82,6 +83,7 @@ class LocalSynthesisAgent:
         This report FAILED validation based on facts:
         {err_txt}
         
+        Rewrite the report to fix ALL issues.
         Rewrite the report to fix ALL issues.
         Rules:
         - Output a SINGLE concise paragraph (IU X-ray style).
@@ -300,6 +302,20 @@ class LocalSynthesisAgent:
         if not v["ok"]:
              yield json.dumps({"status": "repair_start", "iter": 99}) + "\n"
              final_report = await asyncio.to_thread(self.repair_report, final_report, v["errors"], kg_text_block)
+
+        # FRONTEND PARSING FIX: Inject the required headers if they don't exist
+        # Since the frontend parser currently expects explicit 'FINDINGS:' and 'IMPRESSION:' headers,
+        # and forcing the LLM to output them ruins its formatting, we manually construct it here.
+        if "FINDINGS:" not in final_report.upper() and "IMPRESSION:" not in final_report.upper():
+            sentences = [s.strip() + "." for s in final_report.split(".") if s.strip()]
+            if len(sentences) >= 2:
+                # Split roughly down the middle for a basic Findings/Impression split
+                midpoint = len(sentences) // 2
+                findings_text = " ".join(sentences[:midpoint])
+                impression_text = " ".join(sentences[midpoint:])
+                final_report = f"FINDINGS:\n{findings_text}\n\nIMPRESSION:\n{impression_text}"
+            else:
+                final_report = f"FINDINGS:\n{final_report}\n\nIMPRESSION:\n{final_report}"
 
         # ------------------------------------------------------------------
         # NEW: VISUAL EXPLAINABILITY & TRACE
