@@ -75,15 +75,22 @@ class RetrievalAgent:
         self.k = k
         print(f"✅ Retrieval Agent initialized (BioMedCLIP). Top-k={self.k}")
 
-    def retrieve_top_k(self, image_path, reports_dict):
+    def retrieve_top_k(self, image_paths, reports_dict):
         all_reports = list(set(reports_dict.values()))
         if not all_reports:
             print("⚠️ No reports found in dictionary.")
             return []
 
-        # Encode the target image using BioMedCLIP
-        img = Image.open(image_path).convert("RGB")
-        img_feat = self.encoder.encode_image(img)
+        # Encode the target images using BioMedCLIP and average them
+        img_feats = []
+        for path in image_paths:
+            img = Image.open(path).convert("RGB")
+            feat = self.encoder.encode_image(img)
+            img_feats.append(feat)
+            
+        # Average the embeddings across all views and re-normalize
+        avg_img_feat = torch.mean(torch.cat(img_feats, dim=0), dim=0, keepdim=True)
+        avg_img_feat = torch.nn.functional.normalize(avg_img_feat, dim=-1)
 
         # Encode all report texts using BioMedCLIP (256-token PubMedBERT tokenizer)
         # Process in batches to avoid OOM on large report sets
@@ -96,7 +103,7 @@ class RetrievalAgent:
         text_features = torch.cat(text_features_list, dim=0)
 
         # Compute cosine similarity
-        sims = cosine_similarity(img_feat, text_features)
+        sims = cosine_similarity(avg_img_feat, text_features)
         
         # Determine actual k based on available reports
         actual_k = min(self.k, len(all_reports))
@@ -176,7 +183,7 @@ if __name__ == "__main__":
     if os.path.exists(image_path) and reports_dict:
         # 1️⃣ Retrieve top-k similar reports (now using BioMedCLIP)
         retrieval_agent = RetrievalAgent(vision_encoder, k=5)
-        top_reports = retrieval_agent.retrieve_top_k(image_path, reports_dict)
+        top_reports = retrieval_agent.retrieve_top_k([image_path], reports_dict)
 
         # 2️⃣ Generate structured report using local LLM
         llm_agent = LocalLLMReportAgent()

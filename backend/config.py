@@ -9,3 +9,5 @@ OLLAMA_LLAVA_MODEL = "rohithbojja/llava-med-v1.6"
 # Global Settings
 TEMPERATURE = 0.1
 BASE_URL = "http://localhost:11434"
+
+HF_TOKEN = ""

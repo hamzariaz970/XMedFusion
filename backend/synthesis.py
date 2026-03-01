@@ -9,11 +9,10 @@ from langchain_community.chat_models import ChatOllama
 from validators import validate_report
 from PIL import Image 
 import config
-from explain import generate_explainable_image
-from xray_filter import is_chest_xray  # <--- NEW IMPORT
 
-# Import the new explainer function (Make sure your file is named explain.py)
+# <--- NEW IMPORTS --->
 from explain import generate_explainable_image
+from xray_filter import classify_scan  # Replaced is_chest_xray with classify_scan
 
 # --- 1. Import Legacy Draft Agent ---
 from draft import (
@@ -108,40 +107,59 @@ class LocalSynthesisAgent:
              text = text.split("Corrected Report:")[0].strip()
         return text
 
-    async def generate_final_report(self, draft_agent, vision_agent, retrieval_agent, reports_dict, image_paths):
+    # NEW: Added scan_type parameter (defaults to 'auto' for testing)
+    async def generate_final_report(self, draft_agent, vision_agent, retrieval_agent, reports_dict, image_paths, scan_type="auto"):
         target_image = image_paths[0]
-        yield json.dumps({"status": "validating", "message": "Checking if image is a valid X-Ray..."}) + "\n"
+        yield json.dumps({"status": "validating", "message": "Checking image modality..."}) + "\n"
         
-        is_valid, confidence = is_chest_xray(target_image)
+        # --- NEW MULTI-CLASS VALIDATION LOGIC ---
+        detected_modality, confidence = classify_scan(target_image)
         
-        if not is_valid:
-            error_msg = f"Invalid Image Detected. This does not look like a Chest X-Ray (Confidence: {confidence:.1%}). Please upload a valid chest radiograph."
+        if detected_modality == "invalid":
+            error_msg = f"Invalid Image Detected. This does not appear to be a medical scan (Confidence: {confidence:.1%})."
             print(f"❌ {error_msg}")
-            
-            # Immediately halt and send the error back to the frontend
             yield json.dumps({"status": "error", "message": error_msg}) + "\n"
             return
+            
+        if scan_type != "auto" and detected_modality != scan_type:
+            user_friendly_expected = "Chest X-Ray" if scan_type == "xray" else "CT Scan"
+            user_friendly_detected = "Chest X-Ray" if detected_modality == "xray" else "CT Scan"
+            error_msg = f"Validation Mismatch: You selected '{user_friendly_expected}', but uploaded a '{user_friendly_detected}'."
+            print(f"❌ {error_msg}")
+            yield json.dumps({"status": "error", "message": error_msg}) + "\n"
+            return
+        # ----------------------------------------
         
-        yield json.dumps({"status": "parallel_start", "message": "Running Agents..."}) + "\n"
+        yield json.dumps({"status": "parallel_start", "message": f"Running Agents for {detected_modality.upper()}..."}) + "\n"
 
         # --- SEQUENTIAL HELPER FUNCTIONS (Updated for New APIs) ---
         
-        # 1. Vision Agent
+        # 1. Vision Agent (MULTI-IMAGE SUPPORT)
         async def run_vision():
-            print("[DEBUG] Vision Agent: Starting...")
+            print(f"[DEBUG] Vision Agent: Starting for {len(image_paths)} images...")
             try:
-                # Wrap sync calls in thread to avoid blocking loop
                 def _process_vision():
-                    raw = Image.open(target_image).convert("RGB")
-                    # Use global encoder from vision.py (Shared Memory)
-                    emb = vision_encoder.encode_image(raw)
-                    # New Hybrid Findings Logic
-                    findings = get_hybrid_findings(emb)
-                    # New Writer Class
-                    return vision_agent.generate_description(findings)
+                    combined_findings = {}
+                    
+                    # Iterate through every uploaded image
+                    for img_path in image_paths:
+                        raw = Image.open(img_path).convert("RGB")
+                        emb = vision_encoder.encode_image(raw)
+                        # Get findings for this specific view
+                        findings = get_hybrid_findings(emb)
+                        
+                        # Merge into combined_findings, keeping the MAXIMUM confidence score per disease
+                        for disease, score in findings.items():
+                            if disease not in combined_findings:
+                                combined_findings[disease] = score
+                            else:
+                                combined_findings[disease] = max(combined_findings[disease], score)
+
+                    # Now generate description based on the merged multi-view findings
+                    return vision_agent.generate_description(combined_findings)
 
                 res = await asyncio.to_thread(_process_vision)
-                print("[DEBUG] Vision Agent: Finished.")
+                print("[DEBUG] Vision Agent: Finished multi-view analysis.")
                 return res
             except Exception as e:
                 print(f"⚠️ Vision Error: {e}")
@@ -153,7 +171,7 @@ class LocalSynthesisAgent:
             # Use vision_encoder model for retrieval too (Reuse!)
             top_reports = await asyncio.to_thread(
                 retrieval_agent.retrieve_top_k, 
-                target_image, 
+                image_paths, # PASSED LIST OF PATHS INSTEAD OF 1
                 reports_dict
             )
             draft_context = "\n\n".join(truncate_report(r, 75) for r in top_reports)
@@ -235,7 +253,7 @@ class LocalSynthesisAgent:
         final_report = self._clean_output(full_response.strip())
         
         # --- ReAct / CRITIQUE LOOP (RESTORED!) ---
-        MAX_REACT_STEPS = 1 # Keep at 1 for speed, can increase if needed
+        MAX_REACT_STEPS = 0 # Keep at 1 for speed, can increase if needed
         print(f"[DEBUG] Entering ReAct loop.")
         
         for step in range(MAX_REACT_STEPS):
@@ -287,11 +305,6 @@ class LocalSynthesisAgent:
         # NEW: VISUAL EXPLAINABILITY & TRACE
         # ------------------------------------------------------------------
         
-        # Save it right next to the original image, but append '_explained'
-        # ------------------------------------------------------------------
-        # NEW: VISUAL EXPLAINABILITY & TRACE
-        # ------------------------------------------------------------------
-        
         # Create a dedicated output folder for explainable images
         explain_dir = os.path.join("out", "explained_images")
         os.makedirs(explain_dir, exist_ok=True)
@@ -315,10 +328,11 @@ class LocalSynthesisAgent:
                 "retrieval_agent_draft": draft_report
             },
             "reasoning_steps": [
-                "1. Extracted raw visual features and calculated hybrid pathology scores.",
-                "2. Mapped visual findings to anatomical zones to build Knowledge Graph.",
-                "3. Retrieved top-k visually similar historical cases to capture IU X-Ray reporting style.",
-                "4. Synthesized final report prioritizing KG facts, formatted in historical style."
+                f"1. Verified image modality as '{detected_modality.upper()}'.",
+                "2. Extracted raw visual features and calculated hybrid pathology scores.",
+                "3. Mapped visual findings to anatomical zones to build Knowledge Graph.",
+                "4. Retrieved top-k visually similar historical cases.",
+                "5. Synthesized final report prioritizing KG facts, formatted in historical style."
             ]
         }
 
@@ -331,11 +345,6 @@ class LocalSynthesisAgent:
             "explainable_image_path": explained_path if explained_path else "Normal - No highlights needed"
         }) + "\n"
 
-# -------------------------------
-# Example Usage (Test Block)
-# -------------------------------
-# -------------------------------
-# Example Usage (Test Block)
 # -------------------------------
 # Example Usage (Test Block)
 # -------------------------------
@@ -369,6 +378,7 @@ if __name__ == "__main__":
             retrieval_agent=retrieval_agent,
             reports_dict=reports_dict,
             image_paths=image_paths,
+            scan_type="auto" # Default for local testing
         )
 
         async for chunk in gen:
