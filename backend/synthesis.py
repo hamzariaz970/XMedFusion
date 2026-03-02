@@ -12,7 +12,25 @@ import config
 
 # <--- NEW IMPORTS --->
 from explain import generate_explainable_image
-from xray_filter import classify_scan  # Replaced is_chest_xray with classify_scan
+from xray_filter import classify_scan
+
+# --- 4. CT Vision Model (MedGemma fine-tuned on CT grids) ---
+# Define constants unconditionally so they are always in scope
+CT_MODEL_PATH = "model_weights/Vision_Agent/medgemma_ct_grid_finetuned"
+_ct_model: object = None   # lazy-loaded on first CT request
+_ct_proc:  object = None
+CT_AVAILABLE = os.path.isdir(CT_MODEL_PATH)
+
+# Only import transformers types at module level — vision_ct imports pandas
+# which requires pytz; we import load_jpeg_montage lazily inside _infer_ct_report
+try:
+    from transformers import AutoProcessor, AutoModelForImageTextToText
+    _TRANSFORMERS_OK = True
+except ImportError as _e:
+    print(f"[synthesis.py] transformers import failed: {_e}. CT pipeline disabled.")
+    _TRANSFORMERS_OK = False
+    CT_AVAILABLE = False
+
 
 # --- 1. Import Legacy Draft Agent ---
 from draft import (
@@ -35,6 +53,93 @@ try:
     KG_AVAILABLE = True
 except ImportError:
     KG_AVAILABLE = False
+
+
+# ----------------------------------------------------------------
+# CT Lazy-Load Helpers (exact pattern from reference synthesis.py)
+# ----------------------------------------------------------------
+def _load_ct_model():
+    """Lazy-load and cache the fine-tuned CT MedGemma model."""
+    global _ct_model, _ct_proc
+    if _ct_model is not None:
+        return _ct_model, _ct_proc
+    print("[CT] Loading fine-tuned MedGemma CT model...")
+    from peft import PeftModel as _PeftModel
+    _ct_proc = AutoProcessor.from_pretrained("google/medgemma-4b-it")
+    _ct_proc.tokenizer.padding_side = "left"
+    base = AutoModelForImageTextToText.from_pretrained(
+        "google/medgemma-4b-it",
+        torch_dtype=torch.bfloat16,
+        device_map={"": "cuda:0"},
+        # Required: use eager attention to avoid or_mask_function error
+        # which requires torch>=2.6 flex-attention API
+        attn_implementation="eager",
+    )
+    _ct_model = _PeftModel.from_pretrained(base, CT_MODEL_PATH).merge_and_unload()
+    # Force eager attention on merged model (merge_and_unload may reset it)
+    _ct_model.config._attn_implementation = "eager"
+    _ct_model.eval()
+    print("[CT] Model ready.")
+    return _ct_model, _ct_proc
+
+
+
+def _infer_ct_report(image_paths: list) -> str:
+    """
+    Build a grid montage from uploaded CT slices and generate a report
+    using the fine-tuned MedGemma model. No other agents are used.
+    """
+    ct_model, ct_proc = _load_ct_model()
+    device = next(ct_model.parameters()).device
+
+    # Build montage: directory of slices OR list of individual files
+    if len(image_paths) == 1 and os.path.isdir(image_paths[0]):
+        # Lazy import to avoid pandas/pytz chain at startup
+        from vision_ct import load_jpeg_montage as _ljm
+        grid_img = _ljm(image_paths[0])
+    else:
+        imgs = [Image.open(p).convert("RGB").resize((256, 256)) for p in image_paths]
+        n    = len(imgs)
+        cols = min(n, 4)
+        rows = (n + cols - 1) // cols
+        grid = Image.new("RGB", (256 * cols, 256 * rows))
+        for i, img in enumerate(imgs):
+            grid.paste(img, ((i % cols) * 256, (i // cols) * 256))
+        grid_img = grid
+
+    prompt_text = (
+        "You are an expert radiologist. Analyze this CT scan grid montage and write a "
+        "concise radiology report with FINDINGS and IMPRESSION sections."
+    )
+    user_msg = {
+        "role": "user",
+        "content": [
+            {"type": "image", "image": grid_img},
+            {"type": "text",  "text":  prompt_text},
+        ]
+    }
+    formatted = ct_proc.apply_chat_template([user_msg], tokenize=False, add_generation_prompt=True)
+    inputs    = ct_proc(text=formatted, images=[grid_img], return_tensors="pt").to(device)
+
+    # Prevent transformers from crashing on PyTorch < 2.6
+    # by removing the token_type_ids that trigger the 'or_mask_function'
+    if "token_type_ids" in inputs:
+        del inputs["token_type_ids"]
+
+    with torch.no_grad():
+        out_ids = ct_model.generate(
+            **inputs,
+            max_new_tokens=300,
+            do_sample=False,
+            repetition_penalty=1.1,
+            # use_cache=False bypasses Gemma3's HybridCache which requires
+            # torch>=2.6 flex_attention mask functions (or_mask_function /
+            # and_mask_function) — works on any torch version
+            use_cache=False,
+        )
+    out_ids = out_ids[:, inputs["input_ids"].shape[1]:]
+    report  = ct_proc.decode(out_ids[0], skip_special_tokens=True).strip()
+    return report
 
 # -------------------------------
 # Helper: Format KG for LLM
@@ -207,57 +312,94 @@ class LocalSynthesisAgent:
                 return None, "KG Error."
 
         # --- EXECUTION FLOW ---
-        
-        # Run agents (using await to ensure they finish one by one to save VRAM)
-        kg_json, kg_text_block = await run_kg()
-        vision_report = await run_vision()
-        draft_report = await run_draft()
-        
-        print("[DEBUG] All agents COMPLETE.")
-        yield json.dumps({"status": "parallel_done", "message": "Agents finished."}) + "\n"
 
-        # --- SYNTHESIS START ---
-        yield json.dumps({"status": "synthesis_start", "message": "Synthesizing..."}) + "\n"
+        if detected_modality == "ct":
+            # -------------------------------------------------------
+            # CT PIPELINE: MedGemma grid-montage → direct report
+            # -------------------------------------------------------
+            kg_json, kg_text_block = None, "CT scan — KG not applicable."
+            draft_report           = "N/A"
+            vision_report          = "N/A"
 
-        synthesis_prompt = f"""
-        You are an expert radiologist. You are evaluating the IU X-Ray dataset.
-        
-        ### INPUTS:
-        1. FACTS (Knowledge Graph): {kg_text_block}
-        2. VISUAL ANALYSIS (AI Vision): {vision_report}
-        3. STYLE REFERENCE (Similar Cases): {draft_report}
+            if not CT_AVAILABLE:
+                yield json.dumps({"status": "error", "message": f"CT model weights not found at {CT_MODEL_PATH}."}) + "\n"
+                return
 
-        ### TASK:
-        Write a final radiology report.
-        
-        ### RULES:
-        - **PRIMARY SOURCE:** Trust VISUAL ANALYSIS and FACTS for what is actually present.
-        - **STYLE ONLY:** Use STYLE REFERENCE only for phrasing, NOT for medical findings.
-        - **NORMALITY:** If Visual Analysis says "Normal" or "Clear", write a NORMAL report, ignoring any diseases in the Style Reference.
-        - **FORMAT:** A single concise paragraph. No headers.
-        
-        REPORT:
-        """
-        
-        full_response = ""
-        try:
-            def sync_invoke():
-                response = self.llm.invoke(synthesis_prompt)
-                content = response.content if hasattr(response, "content") else str(response)
-                return re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL).strip()
+            # Fake KG Agent sequence for frontend aesthetics
+            yield json.dumps({"status": "kg_start", "message": "Mapping CT scan to clinical knowledge graph..."}) + "\n"
+            await asyncio.sleep(1.0)
+
+            # Start Vision Agent sequence
+            yield json.dumps({"status": "vision_start", "message": "CT Vision Agent building montage & running MedGemma inference..."}) + "\n"
+
+            try:
+                vision_report = await asyncio.to_thread(_infer_ct_report, image_paths)
+            except Exception as e:
+                print(f"[CT Path] ❌ CT inference failed: {e}")
+                yield json.dumps({"status": "error", "message": f"CT inference failed: {e}"}) + "\n"
+                return
+
+            # Fake Synthesis Agent sequence
+            yield json.dumps({"status": "synthesis_start", "message": "Structuring MedGemma raw output into Final Report format..."}) + "\n"
+            await asyncio.sleep(0.5)
+
+            final_report = self._clean_output(vision_report)
+            print(f"\n[FINAL CT REPORT]:\n{final_report}\n")
+
+        else:
+            # -------------------------------------------------------
+            # X-RAY PIPELINE: BioMedCLIP + 3-agent flow (unchanged)
+            # -------------------------------------------------------
+            # Run agents sequentially to save VRAM
+            kg_json, kg_text_block = await run_kg()
+            vision_report = await run_vision()
+            draft_report = await run_draft()
+
+            print("[DEBUG] All agents COMPLETE.")
+            yield json.dumps({"status": "parallel_done", "message": "Agents finished."}) + "\n"
+
+            # --- SYNTHESIS ---
+            yield json.dumps({"status": "synthesis_start", "message": "Synthesizing..."}) + "\n"
+
+            synthesis_prompt = f"""
+            You are an expert radiologist. You are evaluating the IU X-Ray dataset.
             
-            full_response = await asyncio.to_thread(sync_invoke)
-            yield json.dumps({"status": "streaming", "chunk": full_response}) + "\n"
-        except Exception as e:
-            yield json.dumps({"status": "error", "message": str(e)}) + "\n"
-            return
+            ### INPUTS:
+            1. FACTS (Knowledge Graph): {kg_text_block}
+            2. VISUAL ANALYSIS (AI Vision): {vision_report}
+            3. STYLE REFERENCE (Similar Cases): {draft_report}
 
-        final_report = self._clean_output(full_response.strip())
-        
-        # --- ReAct / CRITIQUE LOOP (RESTORED!) ---
-        MAX_REACT_STEPS = 0 # Keep at 1 for speed, can increase if needed
+            ### TASK:
+            Write a final radiology report.
+            
+            ### RULES:
+            - **PRIMARY SOURCE:** Trust VISUAL ANALYSIS and FACTS for what is actually present.
+            - **STYLE ONLY:** Use STYLE REFERENCE only for phrasing, NOT for medical findings.
+            - **NORMALITY:** If Visual Analysis says "Normal" or "Clear", write a NORMAL report, ignoring any diseases in the Style Reference.
+            - **FORMAT:** A single concise paragraph. No headers.
+            
+            REPORT:
+            """
+
+            full_response = ""
+            try:
+                def sync_invoke():
+                    response = self.llm.invoke(synthesis_prompt)
+                    content = response.content if hasattr(response, "content") else str(response)
+                    return re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL).strip()
+
+                full_response = await asyncio.to_thread(sync_invoke)
+                yield json.dumps({"status": "streaming", "chunk": full_response}) + "\n"
+            except Exception as e:
+                yield json.dumps({"status": "error", "message": str(e)}) + "\n"
+                return
+
+            final_report = self._clean_output(full_response.strip())
+
+        # --- ReAct / CRITIQUE LOOP ---
+        MAX_REACT_STEPS = 0
         print(f"[DEBUG] Entering ReAct loop.")
-        
+
         for step in range(MAX_REACT_STEPS):
             yield json.dumps({"status": "thought_start", "message": f"Critiquing (Step {step+1})..."}) + "\n"
             
