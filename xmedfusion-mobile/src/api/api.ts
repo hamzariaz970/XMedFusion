@@ -25,7 +25,7 @@ export const uploadXRay = async (
     const match = /\.(\w+)$/.exec(filename);
     const type = match ? `image/${match[1]}` : `image`;
 
-    formData.append('file', {
+    formData.append('files', {
         uri: imageUri,
         name: filename,
         type,
