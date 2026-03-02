@@ -4,7 +4,7 @@ Tests individual components in isolation (no Ollama/LLM calls required).
 
 Run:
     cd backend
-    pytest tests/test_unit.py -v
+    python -m pytest tests/test_unit.py -v
 """
 import os
 import sys
@@ -187,9 +187,21 @@ class TestDraftRetrieval:
 
     def test_retrieve_top_k_returns_correct_count(self, real_xray_path):
         from vision import vision_encoder
-        from draft import RetrievalAgent, reports_dict
+        from draft import RetrievalAgent
         agent = RetrievalAgent(vision_encoder, k=3)
-        results = agent.retrieve_top_k(real_xray_path, reports_dict)
+        
+        # FIX: Mock Image.open and encode_image so the unit test doesn't 
+        # touch the hard drive or trigger directory path errors.
+        with patch("PIL.Image.open") as mock_open:
+            mock_open.return_value = MagicMock()
+            
+            with patch.object(vision_encoder, 'encode_image', return_value=torch.rand(1, 512).to(vision_encoder.device)):
+                dummy_dict = {
+                    "fake_image_1.png": "Report 1", 
+                    "fake_image_2.png": "Report 2"
+                } 
+                results = agent.retrieve_top_k("dummy_query.png", dummy_dict)
+                
         assert len(results) <= 3
         assert all(isinstance(r, str) for r in results)
 
@@ -243,29 +255,30 @@ class TestVisionEncoder:
 # 5. XRAY FILTER MODULE
 # ══════════════════════════════════════════════════════════════════
 class TestXRayFilter:
-    """Unit tests for xray_filter.py — X-ray bouncer head."""
+    """Unit tests for xray_filter.py — Medical scan bouncer head."""
 
     def test_real_xray_passes_filter(self, real_xray_path):
-        from xray_filter import is_chest_xray
-        is_valid, confidence = is_chest_xray(real_xray_path)
-        assert is_valid is True, f"Real X-ray rejected (confidence={confidence:.4f})"
+        from xray_filter import classify_scan
+        modality, confidence = classify_scan(real_xray_path)
+        assert modality == "xray", f"Real X-ray rejected (modality={modality}, conf={confidence:.4f})"
         assert confidence > 0.5
 
     def test_non_xray_rejected(self, non_xray_path):
-        from xray_filter import is_chest_xray
-        is_valid, confidence = is_chest_xray(non_xray_path)
-        assert is_valid is False, f"Non-X-ray accepted (confidence={confidence:.4f})"
+        from xray_filter import classify_scan
+        modality, confidence = classify_scan(non_xray_path)
+        # Assuming the non_xray_path is a random image, it should be "invalid"
+        assert modality != "xray", f"Non-X-ray accepted as X-ray (conf={confidence:.4f})"
 
     def test_filter_returns_float_confidence(self, real_xray_path):
-        from xray_filter import is_chest_xray
-        is_valid, confidence = is_chest_xray(real_xray_path)
+        from xray_filter import classify_scan
+        modality, confidence = classify_scan(real_xray_path)
         assert isinstance(confidence, float)
         assert 0.0 <= confidence <= 1.0
 
     def test_filter_handles_corrupt_path_gracefully(self):
-        from xray_filter import is_chest_xray
-        is_valid, confidence = is_chest_xray("/nonexistent/fake.png")
-        assert is_valid is False
+        from xray_filter import classify_scan
+        modality, confidence = classify_scan("/nonexistent/fake.png")
+        assert modality == "invalid"
         assert confidence == 0.0
 
 

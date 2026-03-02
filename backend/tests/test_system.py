@@ -86,7 +86,7 @@ class TestSynthesizeValidXray:
         with open(real_xray_path, "rb") as f:
             r = requests.post(
                 f"{API_BASE}/api/synthesize-report",
-                files={"file": ("xray.png", f, "image/png")},
+                files={"files": ("xray.png", f, "image/png")},
                 stream=True,
                 timeout=180,
             )
@@ -96,7 +96,7 @@ class TestSynthesizeValidXray:
         with open(real_xray_path, "rb") as f:
             r = requests.post(
                 f"{API_BASE}/api/synthesize-report",
-                files={"file": ("xray.png", f, "image/png")},
+                files={"files": ("xray.png", f, "image/png")},
                 stream=True,
                 timeout=180,
             )
@@ -112,7 +112,7 @@ class TestSynthesizeValidXray:
         with open(real_xray_path, "rb") as f:
             r = requests.post(
                 f"{API_BASE}/api/synthesize-report",
-                files={"file": ("xray.png", f, "image/png")},
+                files={"files": ("xray.png", f, "image/png")},
                 stream=True,
                 timeout=180,
             )
@@ -131,7 +131,7 @@ class TestSynthesizeValidXray:
         with open(real_xray_path, "rb") as f:
             r = requests.post(
                 f"{API_BASE}/api/synthesize-report",
-                files={"file": ("xray.png", f, "image/png")},
+                files={"files": ("xray.png", f, "image/png")},
                 stream=True,
                 timeout=180,
             )
@@ -155,7 +155,7 @@ class TestSynthesizeInvalidImage:
         with open(non_xray_path, "rb") as f:
             r = requests.post(
                 f"{API_BASE}/api/synthesize-report",
-                files={"file": ("photo.jpg", f, "image/jpeg")},
+                files={"files": ("photo.jpg", f, "image/jpeg")},
                 stream=True,
                 timeout=30,
             )
@@ -164,7 +164,7 @@ class TestSynthesizeInvalidImage:
             if line:
                 data = json.loads(line)
                 if data.get("status") == "error":
-                    assert "X-Ray" in data["message"] or "not a medical" in data["message"].lower()
+                    assert "not appear to be a medical scan" in data["message"].lower()
                     return
         pytest.fail("Expected error status chunk for non-X-ray image")
 
@@ -172,7 +172,7 @@ class TestSynthesizeInvalidImage:
         with open(non_xray_path, "rb") as f:
             r = requests.post(
                 f"{API_BASE}/api/synthesize-report",
-                files={"file": ("photo.jpg", f, "image/jpeg")},
+                files={"files": ("photo.jpg", f, "image/jpeg")},
                 stream=True,
                 timeout=30,
             )

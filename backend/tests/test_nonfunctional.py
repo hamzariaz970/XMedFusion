@@ -54,11 +54,11 @@ class TestPerformance:
 
     def test_xray_filter_inference_under_500ms(self, real_xray_path):
         """X-ray filter (bouncer head) forward pass must be under 500ms."""
-        from xray_filter import is_chest_xray
+        from xray_filter import classify_scan
         # Warm-up
-        is_chest_xray(real_xray_path)
+        classify_scan(real_xray_path)
         t0 = time.perf_counter()
-        is_chest_xray(real_xray_path)
+        classify_scan(real_xray_path)
         elapsed_ms = (time.perf_counter() - t0) * 1000
         assert elapsed_ms < 500, f"Filter took {elapsed_ms:.1f}ms (limit: 500ms)"
 
@@ -68,7 +68,7 @@ class TestPerformance:
         from draft import RetrievalAgent, reports_dict
         agent = RetrievalAgent(vision_encoder, k=5)
         t0 = time.perf_counter()
-        agent.retrieve_top_k(real_xray_path, reports_dict)
+        agent.retrieve_top_k([real_xray_path], reports_dict)
         elapsed = time.perf_counter() - t0
         assert elapsed < 10.0, f"Retrieval took {elapsed:.2f}s (limit: 10s)"
 
@@ -99,11 +99,11 @@ class TestPerformance:
         """
         if not torch.cuda.is_available():
             pytest.skip("GPU not available")
-        from xray_filter import is_chest_xray
+        from xray_filter import classify_scan
         torch.cuda.synchronize()
         before = torch.cuda.memory_allocated()
         for _ in range(5):
-            is_chest_xray(real_xray_path)
+            classify_scan(real_xray_path)
         torch.cuda.synchronize()
         after = torch.cuda.memory_allocated()
         leak_mb = (after - before) / (1024 ** 2)
@@ -159,21 +159,21 @@ class TestRobustness:
 
     def test_filter_grayscale_image(self, tmp_path):
         """X-ray filter must handle grayscale images (common for X-rays)."""
-        from xray_filter import is_chest_xray
+        from xray_filter import classify_scan
         gray = Image.new("L", (224, 224), color=128)
         path = str(tmp_path / "gray.png")
         gray.save(path)
-        is_valid, conf = is_chest_xray(path)
-        assert isinstance(is_valid, bool)
+        modality, conf = classify_scan(path)
+        assert isinstance(modality, str)
         assert 0.0 <= conf <= 1.0
 
     def test_filter_rgba_image(self, tmp_path):
         """X-ray filter must handle RGBA images without crashing."""
-        from xray_filter import is_chest_xray
+        from xray_filter import classify_scan
         rgba = Image.new("RGBA", (224, 224), color=(128, 128, 128, 255))
         path = str(tmp_path / "rgba.png")
         rgba.save(path)
-        is_valid, conf = is_chest_xray(path)
+        modality, conf = classify_scan(path)
         assert isinstance(conf, float)
 
     def test_explain_with_kg_missing_zone_name(self, real_xray_path, tmp_path):
@@ -195,7 +195,7 @@ class TestRobustness:
         # FIX: Removed the unsupported dict multiplication
         tiny_dict = {"/some/path.png": "Normal study."}
         agent = RetrievalAgent(vision_encoder, k=1000)
-        results = agent.retrieve_top_k(real_xray_path, tiny_dict)
+        results = agent.retrieve_top_k([real_xray_path], tiny_dict)
         assert len(results) <= 1  # Can't return more than available
 
     def test_hybrid_findings_all_black_image(self):
@@ -219,7 +219,7 @@ class TestSecurity:
         payload = b"<script>alert('xss')</script>"
         r = requests.post(
             f"{API_BASE}/api/synthesize-report",
-            files={"file": ("evil.html", payload, "text/html")},
+            files={"files": ("evil.html", payload, "text/html")},
             timeout=15,
         )
         # Should return 200 with error stream, or 400/422 — NOT 500
@@ -230,7 +230,7 @@ class TestSecurity:
         """Uploading an empty file must not crash (status 500)."""
         r = requests.post(
             f"{API_BASE}/api/synthesize-report",
-            files={"file": ("empty.png", b"", "image/png")},
+            files={"files": ("empty.png", b"", "image/png")},
             timeout=15,
         )
         assert r.status_code != 500
@@ -258,7 +258,7 @@ class TestSecurity:
         payload = b"\x89PNG\r\n\x1a\n"  # minimal PNG header
         r = requests.post(
             f"{API_BASE}/api/synthesize-report",
-            files={"file": ("../../etc/passwd", payload, "image/png")},
+            files={"files": ("../../etc/passwd", payload, "image/png")},
             timeout=15,
         )
         assert r.status_code != 500
