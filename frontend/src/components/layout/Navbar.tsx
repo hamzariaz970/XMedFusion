@@ -23,7 +23,6 @@ const navItems = [
   { path: "/patients", label: "Patients", icon: Users, requiresAuth: true, requiresPatient: false },
   { path: "/upload", label: "Upload", icon: Upload, requiresAuth: true, requiresPatient: true },
   { path: "/explainability", label: "Explainability", icon: FileSearch, requiresAuth: true, requiresPatient: true },
-  { path: "/knowledge-graph", label: "Knowledge Graph", icon: Network, requiresAuth: true, requiresPatient: true },
 
   //{ path: "/image-mapping", label: "Image Mapping", icon: FileImage, requiresAuth: true, requiresPatient: true },
 ];

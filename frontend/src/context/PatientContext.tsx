@@ -20,6 +20,10 @@ interface PatientContextType {
     patients: Patient[];
     loading: boolean;
     refreshPatients: () => Promise<void>;
+    pendingUploadFiles: File[] | null;
+    setPendingUploadFiles: (files: File[] | null) => void;
+    pendingScanType: string;
+    setPendingScanType: (type: string) => void;
 }
 
 const PatientContext = createContext<PatientContextType | undefined>(undefined);
@@ -28,6 +32,8 @@ export const PatientProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
     const [patients, setPatients] = useState<Patient[]>([]);
     const [loading, setLoading] = useState(true);
+    const [pendingUploadFiles, setPendingUploadFiles] = useState<File[] | null>(null);
+    const [pendingScanType, setPendingScanType] = useState<string>('auto');
 
     const fetchPatients = async () => {
         try {
@@ -95,6 +101,10 @@ export const PatientProvider: React.FC<{ children: React.ReactNode }> = ({ child
                 patients,
                 loading,
                 refreshPatients: fetchPatients,
+                pendingUploadFiles,
+                setPendingUploadFiles,
+                pendingScanType,
+                setPendingScanType,
             }}
         >
             {children}

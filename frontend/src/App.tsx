@@ -10,7 +10,6 @@ import AdminDashboard from "./pages/AdminDashboard";
 import PatientDashboard from "./pages/PatientDashboard";
 import UploadXray from "./pages/UploadXray";
 import ExplainabilityModule from "./pages/ExplainabilityModule";
-import KnowledgeGraph from "./pages/KnowledgeGraph";
 import ImageMapping from "./pages/ImageMapping";
 import NotFound from "./pages/NotFound";
 import { AnalysisProvider } from "@/context/AnalysisContext"; // Import the provider
@@ -35,7 +34,6 @@ const App = () => (
                 <Route path="/patients" element={<PatientDashboard />} />
                 <Route path="/upload" element={<UploadXray />} />
                 <Route path="/explainability" element={<ExplainabilityModule />} />
-                <Route path="/knowledge-graph" element={<KnowledgeGraph />} />
                 <Route path="/image-mapping" element={<ImageMapping />} />
               </Route>
 

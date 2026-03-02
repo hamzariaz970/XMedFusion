@@ -22,6 +22,7 @@ import {
   ArrowRight,
   UserCheck
 } from "lucide-react";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -36,6 +37,7 @@ import jsPDF from "jspdf";
 import { useAnalysis, ParsedReport } from "@/context/AnalysisContext";
 import { usePatientContext } from "@/context/PatientContext";
 import FeedbackPanel from "@/components/FeedbackPanel";
+import KnowledgeGraph from "@/components/KnowledgeGraph";
 import { supabase } from "@/lib/supabaseClient";
 
 type ProcessingStep = 'idle' | 'uploading' | 'analyzing' | 'complete';
@@ -45,23 +47,36 @@ interface ExtendedParsedReport extends ParsedReport {
   recommendation?: string;
 }
 
-const AGENT_STEPS = [
+const XRAY_AGENT_STEPS = [
   { id: 'vision', label: 'Vision Agent', description: 'Extracting relevant visual features & embeddings...', icon: Scan, color: 'text-blue-500', progress: 25 },
   { id: 'draft', label: 'Retrieval and Draft Agent', description: 'Fetching similar cases from vector DB and generating draft report...', icon: Database, color: 'text-amber-500', progress: 50 },
   { id: 'kg', label: 'Knowledge Graph Agent', description: 'Extracting clinical entities & relationships from input scan...', icon: Network, color: 'text-purple-500', progress: 75 },
   { id: 'synthesis', label: 'Synthesis Agent', description: 'Composing detailed final narrative report...', icon: Sparkles, color: 'text-emerald-500', progress: 90 }
 ];
 
+const CT_AGENT_STEPS = [
+  { id: 'kg', label: 'Knowledge Graph Agent', description: 'Mapping CT scan to clinical knowledge graph...', icon: Network, color: 'text-purple-500', progress: 20 },
+  { id: 'vision', label: 'CT Vision Agent (MedGemma)', description: 'Building CT slice montage and running MedGemma inference...', icon: Brain, color: 'text-blue-500', progress: 55 },
+  { id: 'synthesis', label: 'Report Synthesis', description: 'Structuring CT findings into FINDINGS / IMPRESSION format...', icon: Sparkles, color: 'text-emerald-500', progress: 90 }
+];
+
+const AGENT_STEPS = XRAY_AGENT_STEPS; // Legacy alias
+
+const getAgentSteps = (scanType: string) =>
+  scanType === 'ct' ? CT_AGENT_STEPS : XRAY_AGENT_STEPS;
+
+
 const UploadXray = () => {
   const {
     uploadedFile,
     previewUrl,
     report,
+    knowledgeGraphData,
     setAnalysisResults,
     resetAnalysis
   } = useAnalysis();
 
-  const { selectedPatient } = usePatientContext();
+  const { selectedPatient, pendingUploadFiles, setPendingUploadFiles, pendingScanType, setPendingScanType } = usePatientContext();
 
   const [tempFiles, setTempFiles] = useState<File[]>([]);
   const [tempPreviews, setTempPreviews] = useState<string[]>([]);
@@ -137,10 +152,16 @@ const UploadXray = () => {
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
+      let finishedSuccessfully = false;
 
       while (true) {
         const { done, value } = await reader.read();
-        if (done) break;
+        if (done) {
+          if (!finishedSuccessfully) {
+            throw new Error("The backend server disconnected prematurely before finishing the analysis.");
+          }
+          break;
+        }
 
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split("\n");
@@ -150,9 +171,20 @@ const UploadXray = () => {
           if (!line.trim()) continue;
           try {
             const data = JSON.parse(line);
-            if (data.status === "vision_start") { setActiveAgentIndex(0); setProgress(AGENT_STEPS[0].progress); }
-            else if (data.status === "draft_start") { setActiveAgentIndex(1); setProgress(AGENT_STEPS[1].progress); }
-            else if (data.status === "kg_start") { setActiveAgentIndex(2); setProgress(AGENT_STEPS[2].progress); }
+            const currentSteps = getAgentSteps(scanType);
+
+            const updateStepInfo = (stepId: string) => {
+              const idx = currentSteps.findIndex(s => s.id === stepId);
+              if (idx !== -1) {
+                setActiveAgentIndex(idx);
+                setProgress(currentSteps[idx].progress);
+              }
+            };
+
+            if (data.status === "vision_start") updateStepInfo("vision");
+            else if (data.status === "draft_start") updateStepInfo("draft");
+            else if (data.status === "kg_start") updateStepInfo("kg");
+            else if (data.status === "synthesis_start") updateStepInfo("synthesis");
             else if (data.status === "error") {
               alert(data.message);
               setTempFiles([]);
@@ -162,6 +194,7 @@ const UploadXray = () => {
               return; // Stop processing
             }
             else if (data.status === "complete") {
+              finishedSuccessfully = true;
               const parsedReport = parseReportText(data.final_report);
               // Set analysis results to use the first image for the main report view card
               setAnalysisResults(fileArray[0], newPreviews[0], parsedReport, data.knowledge_graph, data.heatmap);
@@ -280,7 +313,23 @@ const UploadXray = () => {
       setCurrentStep('idle');
       setProgress(0);
     }
-  }, [setAnalysisResults, tempPreviews, scanType, selectedPatient]); // Added scanType to dependencies
+  }, [setAnalysisResults, tempPreviews, scanType, selectedPatient]);
+
+  // AUTO-TRIGGER: When coming from Patient Dashboard via Upload Scan button
+  useEffect(() => {
+    if (pendingUploadFiles && pendingUploadFiles.length > 0) {
+      // 1. Set the scan type from the dialog selection BEFORE processing
+      setScanType(pendingScanType as ScanType);
+      // 2. Clear from context so it doesn't re-fire on re-render
+      const files = pendingUploadFiles;
+      setPendingUploadFiles(null);
+      setPendingScanType('auto');
+      // 3. Small delay so the state update settles, then fire
+      setTimeout(() => processFiles(files), 50);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Run only on mount
+
 
   const handleReset = useCallback(() => {
     tempPreviews.forEach(p => URL.revokeObjectURL(p));
@@ -449,10 +498,24 @@ const UploadXray = () => {
             <div className="space-y-6">
               <Card className="overflow-hidden border-2">
                 <CardContent className="p-4">
+                  <Tabs
+                    defaultValue="auto"
+                    value={scanType}
+                    onValueChange={(val) => setScanType(val as ScanType)}
+                    className="w-full max-w-sm mx-auto mb-6"
+                  >
+                    <TabsList className="grid w-full grid-cols-3 bg-slate-800 text-slate-400">
+                      <TabsTrigger value="auto" className="data-[state=active]:bg-slate-700 data-[state=active]:text-white">Auto</TabsTrigger>
+                      <TabsTrigger value="xray" className="data-[state=active]:bg-slate-700 data-[state=active]:text-white">X-Ray</TabsTrigger>
+                      <TabsTrigger value="ct" className="data-[state=active]:bg-slate-700 data-[state=active]:text-white">CT Scan</TabsTrigger>
+                    </TabsList>
+                  </Tabs>
+
                   {!displayFile ? (
                     <>
                       {/* NEW: Scan Type Selector */}
-                      <div className="mb-4">
+                      {/* This section is now replaced by the Tabs component above */}
+                      {/* <div className="mb-4">
                         <label className="text-sm font-semibold text-muted-foreground block mb-2 text-center uppercase tracking-wider">
                           Select Scan Type
                         </label>
@@ -551,7 +614,7 @@ const UploadXray = () => {
                     <span>
                       {currentStep === 'complete' ? 'Analysis Complete' :
                         currentStep === 'uploading' ? 'Uploading...' :
-                          AGENT_STEPS[activeAgentIndex].label}
+                          (getAgentSteps(scanType)[activeAgentIndex]?.label ?? 'Processing...')}
                     </span>
                     <span>{progress}%</span>
                   </div>
@@ -643,12 +706,6 @@ const UploadXray = () => {
                         <Eye className="ml-2 w-4 h-4" />
                       </Button>
                     </Link>
-                    <Link to="/knowledge-graph" className="flex-1">
-                      <Button variant="default" className="w-full">
-                        Explore Knowledge Graph
-                        <ArrowRight className="ml-2 w-4 h-4" />
-                      </Button>
-                    </Link>
                   </div>
 
                   {/* HITL Feedback */}
@@ -679,7 +736,7 @@ const UploadXray = () => {
                       </div>
 
                       <div className="space-y-6">
-                        {AGENT_STEPS.map((step, index) => {
+                        {getAgentSteps(scanType).map((step, index) => {
                           const isActive = index === activeAgentIndex;
                           const isCompleted = index < activeAgentIndex;
                           return (
@@ -706,6 +763,13 @@ const UploadXray = () => {
               )}
             </div>
           </div>
+
+          {/* KNOWLEDGE GRAPH FULL WIDTH SECTION */}
+          {extendedReport && knowledgeGraphData && (
+            <div className="mt-12 animate-in fade-in slide-in-from-bottom-4 duration-700">
+              <KnowledgeGraph data={knowledgeGraphData} />
+            </div>
+          )}
         </div>
       </section>
     </Layout>
