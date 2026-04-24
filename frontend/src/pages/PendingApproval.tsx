@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -5,8 +6,22 @@ import { Activity, Clock, LogOut, ShieldOff, RefreshCw } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 
 const PendingApproval = () => {
-  const { isRejected, signOut, refreshRole } = useAuth();
+  const { isRejected, isApproved, isAdmin, session, signOut, refreshRole } = useAuth();
   const navigate = useNavigate();
+
+  // Auto-redirect if user is already approved
+  useEffect(() => {
+    if (isApproved) {
+      navigate(isAdmin ? "/admin" : "/upload", { replace: true });
+    }
+  }, [isApproved, isAdmin, navigate]);
+
+  // Redirect to login if not logged in
+  useEffect(() => {
+    if (!session) {
+      navigate("/login", { replace: true });
+    }
+  }, [session, navigate]);
 
   const handleSignOut = async () => {
     await signOut();
@@ -15,6 +30,7 @@ const PendingApproval = () => {
 
   const handleRefresh = async () => {
     await refreshRole();
+    // The useEffect above will handle the redirect if approved
   };
 
   return (
