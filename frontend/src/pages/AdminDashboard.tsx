@@ -113,9 +113,10 @@ const AdminDashboard = () => {
         if (error) throw error;
         toast.success("Doctor updated.");
       } else {
-        const { error } = await supabase.from("doctors").insert({ full_name: formName.trim(), email: formEmail.trim(), specialization: formSpec, status: formStatus, user_id: crypto.randomUUID() });
+        // Admin pre-approves this doctor — when they sign up, they'll be auto-approved
+        const { error } = await supabase.from("doctors").insert({ full_name: formName.trim(), email: formEmail.trim(), specialization: formSpec, status: "pre-approved", user_id: crypto.randomUUID() });
         if (error) throw error;
-        toast.success("Doctor added.");
+        toast.success("Doctor pre-approved. They will have instant access when they sign up.");
       }
       setModalOpen(false); fetchDoctors();
     } catch (e: any) { toast.error(e.message); } finally { setSaving(false); }

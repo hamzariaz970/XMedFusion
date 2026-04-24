@@ -82,38 +82,62 @@ const Login = () => {
           return;
         }
 
-        // 2. Insert user_roles row (pending doctor)
+        // 2. Check if admin pre-approved this email
+        const { data: preApproved } = await supabase
+          .from("doctors")
+          .select("*")
+          .eq("email", email.trim())
+          .eq("status", "pre-approved")
+          .maybeSingle();
+
+        const isPreApproved = !!preApproved;
+
+        // 3. Insert user_roles row
         const { error: roleError } = await supabase
           .from("user_roles")
           .insert({
             user_id: userId,
             role: "doctor",
-            approval_status: "pending",
+            approval_status: isPreApproved ? "approved" : "pending",
           });
         if (roleError) {
           console.error("Failed to insert user_role:", roleError);
         }
 
-        // 3. Insert doctors row
-        const { error: docError } = await supabase.from("doctors").insert({
-          user_id: userId,
-          full_name: fullName.trim(),
-          email: email.trim(),
-          specialization,
-          status: "active",
-        });
-        if (docError) {
-          console.error("Failed to insert doctor:", docError);
+        if (isPreApproved) {
+          // Update the pre-approved doctor row with the real user_id
+          const { error: updateErr } = await supabase
+            .from("doctors")
+            .update({ user_id: userId, status: "active" })
+            .eq("id", preApproved.id);
+          if (updateErr) {
+            console.error("Failed to update pre-approved doctor:", updateErr);
+          }
+        } else {
+          // 4. Insert new doctors row
+          const { error: docError } = await supabase.from("doctors").insert({
+            user_id: userId,
+            full_name: fullName.trim(),
+            email: email.trim(),
+            specialization,
+            status: "active",
+          });
+          if (docError) {
+            console.error("Failed to insert doctor:", docError);
+          }
         }
 
-        // 4. Refresh role context
+        // 5. Refresh role context
         await refreshRole();
 
         if (data.session) {
-          toast.info(
-            "Account created! Your registration is pending admin approval."
-          );
-          navigate("/pending");
+          if (isPreApproved) {
+            toast.success("Account created! You've been pre-approved by an admin.");
+            navigate("/upload");
+          } else {
+            toast.info("Account created! Your registration is pending admin approval.");
+            navigate("/pending");
+          }
         } else {
           toast.success(
             "Check your email for the confirmation link. Your account will need admin approval after verification."
