@@ -19,6 +19,7 @@ from tqdm import tqdm
 import argparse
 import copy
 
+import config
 from config import HF_TOKEN
 os.environ["HF_TOKEN"] = HF_TOKEN
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
@@ -184,7 +185,7 @@ def load_and_format_dataset(csv_path: str, meta_dict: dict, jpegs_root: str, spl
 # ------------------------------------------------------------------
 class LLMJudge:
     def __init__(self, model_name="gpt-oss:20b"):
-        self.llm = ChatOllama(model=model_name, temperature=0.1)
+        self.llm = ChatOllama(model=model_name, temperature=config.TEMPERATURE, num_ctx=config.CONTEXT_WINDOW)
 
     def evaluate_medical_accuracy(self, reference, hypothesis):
         prompt = f"""

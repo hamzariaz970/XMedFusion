@@ -167,7 +167,7 @@ def main():
 
     if needs_judging:
         print(f"\n⚖️ {len(needs_judging)} entries need LLM Judge scoring ({config.OLLAMA_JUDGE_MODEL})...")
-        judge_llm = ChatOllama(model=config.OLLAMA_JUDGE_MODEL, temperature=0.1)
+        judge_llm = ChatOllama(model=config.OLLAMA_JUDGE_MODEL, temperature=config.TEMPERATURE, num_ctx=config.CONTEXT_WINDOW)
         judge = LLMJudge(judge_llm)
 
         for i, item in enumerate(needs_judging):

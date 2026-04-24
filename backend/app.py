@@ -232,6 +232,7 @@ async def generate_explanation(req: ExplainRequest):
         llm = ChatOllama(
             model=model_name,
             temperature=config.TEMPERATURE,
+            num_ctx=config.CONTEXT_WINDOW,
             base_url=config.BASE_URL
         )
         

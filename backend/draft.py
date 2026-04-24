@@ -128,7 +128,8 @@ class LocalLLMReportAgent:
             
             self.llm = ChatOllama(
                 model=model_name, 
-                temperature=config.TEMPERATURE
+                temperature=config.TEMPERATURE,
+                num_ctx=config.CONTEXT_WINDOW
             )
 
     def generate_report(self, visual_description):

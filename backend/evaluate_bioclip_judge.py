@@ -17,6 +17,7 @@ from PIL import Image
 # Use the updated LangChain core import
 from langchain_community.chat_models import ChatOllama
 from langchain_core.messages import HumanMessage
+import config
 
 # ------------------------------------------------------------------
 # CONFIGURATION
@@ -155,8 +156,8 @@ async def run_evaluation():
         tokenizer = open_clip.get_tokenizer(BIOCLIP_MODEL)
         clip_model.eval()
 
-        generator_llm = ChatOllama(model=LLM_GENERATOR_MODEL, temperature=0.2)
-        judge_llm = ChatOllama(model=LLM_JUDGE_MODEL, temperature=0.1)
+        generator_llm = ChatOllama(model=LLM_GENERATOR_MODEL, temperature=config.TEMPERATURE, num_ctx=config.CONTEXT_WINDOW)
+        judge_llm = ChatOllama(model=LLM_JUDGE_MODEL, temperature=config.TEMPERATURE, num_ctx=config.CONTEXT_WINDOW)
         
         formatter = ReportFormatter(judge_llm)
         judge = LLMJudge(judge_llm)

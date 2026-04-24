@@ -154,7 +154,7 @@ async def run_evaluation():
         synthesis_agent = LocalSynthesisAgent()
         
         print(f"⚖️ Initializing Judge ({config.OLLAMA_JUDGE_MODEL})...")
-        judge_llm = ChatOllama(model=config.OLLAMA_JUDGE_MODEL, temperature=0.1)
+        judge_llm = ChatOllama(model=config.OLLAMA_JUDGE_MODEL, temperature=config.TEMPERATURE, num_ctx=config.CONTEXT_WINDOW)
         judge = LLMJudge(judge_llm)
         
         formatter = ReportFormatter(draft_agent)

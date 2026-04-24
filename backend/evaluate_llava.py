@@ -185,11 +185,11 @@ async def run_llava_evaluation():
         print("🎉 All samples already generated! Skipping to scoring.")
     else:
         # Initialise LLaVA-Med via Ollama
-        llm = ChatOllama(model=MODEL_NAME, temperature=0.2)
+        llm = ChatOllama(model=MODEL_NAME, temperature=config.TEMPERATURE, num_ctx=config.CONTEXT_WINDOW)
 
         # Initialise Judge
         print(f"⚖️ Initializing Judge ({config.OLLAMA_JUDGE_MODEL})...")
-        judge_llm = ChatOllama(model=config.OLLAMA_JUDGE_MODEL, temperature=0.1)
+        judge_llm = ChatOllama(model=config.OLLAMA_JUDGE_MODEL, temperature=config.TEMPERATURE, num_ctx=config.CONTEXT_WINDOW)
         judge = LLMJudge(judge_llm)
 
         os.makedirs(os.path.dirname(OUTPUT_FILE), exist_ok=True)

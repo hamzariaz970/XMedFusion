@@ -176,6 +176,7 @@ class LocalSynthesisAgent:
         self.llm = ChatOllama(
             model=model_name, 
             temperature=config.TEMPERATURE,
+            num_ctx=config.CONTEXT_WINDOW,
             keep_alive=3600,  # Keep model hot in VRAM for 1 hour
             # CRITICAL SAFETY: Stop markers
             stop=["<|endoftext|>", "RECOMMENDATIONS:", "\n\n\n\n"] 

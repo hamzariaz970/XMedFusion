@@ -70,6 +70,7 @@ class LocalSynthesisAgent:
         self.llm = ChatOllama(
             model=model_name, 
             temperature=config.TEMPERATURE,
+            num_ctx=config.CONTEXT_WINDOW,
             # CRITICAL SAFETY: Stop markers
             stop=["<|endoftext|>", "RECOMMENDATIONS:", "\n\n\n\n"] 
         )

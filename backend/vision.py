@@ -289,7 +289,7 @@ class VisualDescriptionAgent:
     def __init__(self, model_name="MedAIBase/MedGemma1.5:4b"): 
         if model_name.startswith("ollama/"):
             model_name = model_name.split("/", 1)[1]
-        self.llm = ChatOllama(model=model_name, temperature=0.1)
+        self.llm = ChatOllama(model=model_name, temperature=config.TEMPERATURE, num_ctx=config.CONTEXT_WINDOW)
 
     def generate_description(self, findings_dict):
         # Sort by confidence
