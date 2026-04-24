@@ -1,33 +1,47 @@
-import { useEffect, useState } from "react";
 import { Navigate, Outlet } from "react-router-dom";
-import { supabase } from "@/lib/supabaseClient";
+import { useAuth } from "@/context/AuthContext";
+import { Activity } from "lucide-react";
 
-export const ProtectedRoute = () => {
-    const [session, setSession] = useState<any>(null);
-    const [loading, setLoading] = useState(true);
+interface ProtectedRouteProps {
+  requireAdmin?: boolean;
+}
 
-    useEffect(() => {
-        supabase.auth.getSession().then(({ data: { session } }) => {
-            setSession(session);
-            setLoading(false);
-        });
+export const ProtectedRoute = ({ requireAdmin = false }: ProtectedRouteProps) => {
+  const { session, loading, isAdmin, isPending, isRejected, isApproved, userRole } = useAuth();
 
-        const {
-            data: { subscription },
-        } = supabase.auth.onAuthStateChange((_event, session) => {
-            setSession(session);
-        });
+  if (loading) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-background">
+        <div className="flex flex-col items-center gap-4 animate-in fade-in duration-500">
+          <div className="w-12 h-12 rounded-xl bg-primary flex items-center justify-center shadow-glow">
+            <Activity className="w-6 h-6 text-primary-foreground animate-pulse" />
+          </div>
+          <p className="text-sm text-muted-foreground">Loading...</p>
+        </div>
+      </div>
+    );
+  }
 
-        return () => subscription.unsubscribe();
-    }, []);
+  // Not logged in at all
+  if (!session) {
+    return <Navigate to="/login" replace />;
+  }
 
-    if (loading) {
-        return <div className="flex h-screen items-center justify-center">Loading...</div>;
-    }
+  // User has no role entry yet (shouldn't happen in normal flow, but safety net)
+  // Or user is pending/rejected => show pending page
+  if (!userRole || isPending || isRejected) {
+    return <Navigate to="/pending" replace />;
+  }
 
-    if (!session) {
-        return <Navigate to="/login" replace />;
-    }
+  // Route requires admin but user is not admin
+  if (requireAdmin && !isAdmin) {
+    return <Navigate to="/upload" replace />;
+  }
 
-    return <Outlet />;
+  // Doctor must be approved to access protected routes
+  if (!isApproved) {
+    return <Navigate to="/pending" replace />;
+  }
+
+  return <Outlet />;
 };
