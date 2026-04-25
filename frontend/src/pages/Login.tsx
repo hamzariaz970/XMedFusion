@@ -105,10 +105,15 @@ const Login = () => {
         }
 
         if (isPreApproved) {
-          // Update the pre-approved doctor row with the real user_id
+          // Update the pre-approved doctor row with the real user_id and their chosen profile details
           const { error: updateErr } = await supabase
             .from("doctors")
-            .update({ user_id: userId, status: "active" })
+            .update({ 
+              user_id: userId, 
+              status: "active",
+              full_name: fullName.trim(),
+              specialization: specialization
+            })
             .eq("id", preApproved.id);
           if (updateErr) {
             console.error("Failed to update pre-approved doctor:", updateErr);
