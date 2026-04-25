@@ -16,6 +16,7 @@ import UploadXray from "./pages/UploadXray";
 import ExplainabilityModule from "./pages/ExplainabilityModule";
 import ImageMapping from "./pages/ImageMapping";
 import NotFound from "./pages/NotFound";
+import HILLabelingPage from "./pages/HILLabelingPage";
 
 const queryClient = new QueryClient();
 
@@ -44,6 +45,7 @@ const App = () => (
                   <Route path="/upload" element={<UploadXray />} />
                   <Route path="/explainability" element={<ExplainabilityModule />} />
                   <Route path="/image-mapping" element={<ImageMapping />} />
+                  <Route path="/hil/task/:taskId" element={<HILLabelingPage />} />
                 </Route>
 
                 <Route path="*" element={<NotFound />} />

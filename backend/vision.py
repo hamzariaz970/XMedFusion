@@ -157,6 +157,22 @@ if os.path.exists(TRAINED_HEAD_PATH):
 else:
     print(f"⚠️ Classifier weights not found at {TRAINED_HEAD_PATH}")
 
+def reload_classifier_head():
+    """Hot-reload classifier weights from disk after HIL fine-tuning."""
+    global classifier
+    if os.path.exists(TRAINED_HEAD_PATH):
+        try:
+            state_dict = torch.load(TRAINED_HEAD_PATH, map_location=device)
+            classifier.load_state_dict(state_dict)
+            classifier.eval()
+            print(f"🔄 Hot-reloaded classifier from {TRAINED_HEAD_PATH}")
+            return True
+        except Exception as e:
+            print(f"⚠️ Failed to hot-reload classifier: {e}")
+            return False
+    print(f"⚠️ Cannot reload: weights not found at {TRAINED_HEAD_PATH}")
+    return False
+
 # 2b. Load fine-tuned backbone weights if available
 TRAINED_BACKBONE_PATH = "model_weights/KG_Agent/biomed_clip/biomed_clip_backbone_finetuned.pth"
 if os.path.exists(TRAINED_BACKBONE_PATH):

@@ -1,10 +1,11 @@
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { Activity, Upload, Network, FileImage, Menu, X, Users, FileSearch, LogIn, LogOut, ShieldCheck } from "lucide-react";
-import { useState } from "react";
+import { Activity, Upload, Network, FileImage, Menu, X, Users, FileSearch, LogIn, LogOut, ShieldCheck, Brain } from "lucide-react";
+import { useState, useEffect } from "react";
 import { cn } from "@/lib/utils";
 import { usePatientContext } from "@/context/PatientContext";
 import { useAuth } from "@/context/AuthContext";
+import { supabase } from "@/lib/supabaseClient";
 
 const navItems = [
   { path: "/", label: "Home", icon: Activity, requiresAuth: false, requiresPatient: false },
@@ -17,8 +18,20 @@ export const Navbar = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const [isOpen, setIsOpen] = useState(false);
-  const { session, isAdmin, signOut: authSignOut } = useAuth();
+  const { session, isAdmin, isDoctor, user, signOut: authSignOut } = useAuth();
   const { selectedPatient, setSelectedPatient } = usePatientContext();
+  const [hilTaskCount, setHilTaskCount] = useState(0);
+
+  useEffect(() => {
+    if (!user || !isDoctor) return;
+    const fetchHilTasks = async () => {
+      const { data, error } = await supabase.from("hil_tasks").select("id").eq("doctor_id", user.id).in("status", ["assigned", "in_progress"]);
+      if (!error && data) setHilTaskCount(data.length);
+    };
+    fetchHilTasks();
+    const interval = setInterval(fetchHilTasks, 30000);
+    return () => clearInterval(interval);
+  }, [user, isDoctor]);
 
   const handleSignOut = async () => {
     setSelectedPatient(null);
@@ -62,6 +75,15 @@ export const Navbar = () => {
                 <Button variant={location.pathname === "/admin" ? "default" : "ghost"} size="sm" className="gap-2">
                   <ShieldCheck className="w-4 h-4" />
                   Admin
+                </Button>
+              </Link>
+            )}
+            {session && isDoctor && hilTaskCount > 0 && (
+              <Link to={`/patients`}>
+                <Button variant="ghost" size="sm" className="gap-2 relative">
+                  <Brain className="w-4 h-4" />
+                  HIL Tasks
+                  <span className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-primary text-primary-foreground text-xs flex items-center justify-center animate-pulse">{hilTaskCount}</span>
                 </Button>
               </Link>
             )}

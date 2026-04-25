@@ -39,11 +39,13 @@ import {
   Network,
   Upload,
   Image as ImageIcon,
-  X
+  X,
+  Brain
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/lib/supabaseClient";
 import { usePatientContext } from "@/context/PatientContext";
+import { useAuth } from "@/context/AuthContext";
 import { toast } from "sonner";
 
 interface MedicalScan {
@@ -90,6 +92,17 @@ const PatientDashboard = () => {
   const [newGender, setNewGender] = useState("");
   const [newConditions, setNewConditions] = useState("");
   const [newNotes, setNewNotes] = useState("");
+  const [hilTasks, setHilTasks] = useState<{id: string; title: string; total_scans: number; completed_scans: number; status: string; instructions: string}[]>([]);
+  const { user } = useAuth();
+
+  useEffect(() => {
+    if (!user) return;
+    const fetchHil = async () => {
+      const { data } = await supabase.from("hil_tasks").select("*").eq("doctor_id", user.id).in("status", ["assigned", "in_progress"]).order("created_at", { ascending: false });
+      if (data) setHilTasks(data);
+    };
+    fetchHil();
+  }, [user]);
 
   const filteredPatients = patients.filter((patient) => {
     const matchesSearch =
@@ -351,6 +364,36 @@ const PatientDashboard = () => {
             </CardContent>
           </Card>
         </div>
+
+        {/* HIL Tasks Notification */}
+        {hilTasks.length > 0 && (
+          <Card className="mb-8 border-primary/30 bg-primary/5">
+            <CardContent className="pt-6 pb-4">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-10 h-10 rounded-xl bg-primary/20 flex items-center justify-center">
+                  <Brain className="w-5 h-5 text-primary" />
+                </div>
+                <div>
+                  <h3 className="font-semibold text-foreground">Pending Labeling Tasks</h3>
+                  <p className="text-sm text-muted-foreground">You have {hilTasks.length} task(s) awaiting your expert review</p>
+                </div>
+              </div>
+              <div className="space-y-3">
+                {hilTasks.map(t => (
+                  <div key={t.id} className="flex items-center justify-between bg-card rounded-lg border p-3">
+                    <div>
+                      <p className="font-medium text-foreground">{t.title}</p>
+                      <p className="text-xs text-muted-foreground">{t.completed_scans}/{t.total_scans} scans labeled</p>
+                    </div>
+                    <Button size="sm" className="gap-1" onClick={() => navigate(`/hil/task/${t.id}`)}>
+                      <FileText className="w-3.5 h-3.5" /> Start Labeling
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         <div className="w-full">
           {/* Patient List */}
