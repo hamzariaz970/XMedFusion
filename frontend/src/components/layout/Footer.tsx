@@ -1,63 +1,69 @@
-import { Activity, Github, Linkedin, Mail } from "lucide-react";
+import { Github, Linkedin, Mail, Plus } from "lucide-react";
 import { Link } from "react-router-dom";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 export const Footer = () => {
   return (
-    <footer className="bg-foreground text-background py-12 mt-auto">
-      <div className="container mx-auto px-4">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
-          {/* Brand */}
-          <div className="col-span-1 md:col-span-2">
-            <Link to="/" className="flex items-center gap-2 mb-4">
-              <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center">
-                <Activity className="w-5 h-5 text-primary-foreground" />
-              </div>
-              <span className="text-xl font-bold">
-                XMed<span className="text-primary">Fusion</span>
-              </span>
-            </Link>
-            <p className="text-background/70 max-w-md">
-              An agentic AI framework for generating clinically grounded radiology reports from medical imaging with full transparency and evidence linking.
-            </p>
-          </div>
-
-          {/* Quick Links */}
-          <div>
-            <h4 className="font-semibold mb-4">Quick Links</h4>
-            <ul className="space-y-2 text-background/70">
-              <li><Link to="/" className="hover:text-primary transition-colors">Home</Link></li>
-              <li><Link to="/upload" className="hover:text-primary transition-colors">Upload X-ray</Link></li>
-              <li><Link to="/knowledge-graph" className="hover:text-primary transition-colors">Knowledge Graph</Link></li>
-              {/* <li><Link to="/image-mapping" className="hover:text-primary transition-colors">Image Mapping</Link></li> */}
-            </ul>
-          </div>
-
-          {/* Technologies */}
-          <div>
-            <h4 className="font-semibold mb-4">Technologies</h4>
-            <ul className="space-y-2 text-background/70 text-sm">
-              <li>PyTorch & Transformers</li>
-              <li>ResNet-101 & Swin Transformer</li>
-              <li>CLIP & Knowledge Graphs</li>
-              <li>Multi-Agent Systems</li>
-            </ul>
-          </div>
+    <footer className="mt-auto bg-white text-foreground">
+      <div className="figma-container grid gap-10 py-16 md:grid-cols-[1.2fr_0.7fr_0.8fr_1.2fr]">
+        <div>
+          <Link to="/" className="mb-8 flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-br from-sky-600 to-primary">
+              <Plus className="h-6 w-6 stroke-[4] text-white" />
+            </div>
+            <span className="text-2xl font-extrabold">XMedFusion</span>
+          </Link>
+          <h2 className="max-w-sm text-4xl font-extrabold leading-tight tracking-tight">
+            Join our team, Transform <span className="text-primary">healthcare.</span>
+          </h2>
         </div>
 
-        <div className="border-t border-background/20 mt-8 pt-8 flex flex-col md:flex-row items-center justify-between gap-4">
-          <p className="text-background/60 text-sm">
-            © 2025 XMedFusion. Advancing transparent AI for healthcare.
-          </p>
-          <div className="flex items-center gap-4">
-            <a href="#" className="text-background/60 hover:text-primary transition-colors">
-              <Github className="w-5 h-5" />
-            </a>
-            <a href="#" className="text-background/60 hover:text-primary transition-colors">
-              <Linkedin className="w-5 h-5" />
-            </a>
-            <a href="#" className="text-background/60 hover:text-primary transition-colors">
-              <Mail className="w-5 h-5" />
-            </a>
+        <div>
+          <h3 className="mb-5 font-semibold">Menu</h3>
+          <ul className="space-y-3 text-sm text-muted-foreground">
+            <li><Link to="/" className="transition-colors hover:text-primary">About</Link></li>
+            <li><Link to="/" className="transition-colors hover:text-primary">Blogs</Link></li>
+            <li><Link to="/knowledge-graph" className="transition-colors hover:text-primary">How It Works</Link></li>
+            <li><Link to="/image-mapping" className="transition-colors hover:text-primary">Testimonials</Link></li>
+          </ul>
+        </div>
+
+        <div>
+          <h3 className="mb-5 font-semibold">Product</h3>
+          <ul className="space-y-3 text-sm text-muted-foreground">
+            <li><Link to="/patients" className="transition-colors hover:text-primary">Patient Resources</Link></li>
+            <li><Link to="/upload" className="transition-colors hover:text-primary">Appointments</Link></li>
+            <li><Link to="/explainability" className="transition-colors hover:text-primary">Services</Link></li>
+          </ul>
+        </div>
+
+        <div>
+          <h3 className="mb-5 font-semibold">Subscribe our newsletter for update</h3>
+          <div className="flex rounded-full border border-border p-1">
+            <Input className="h-10 rounded-full border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0" placeholder="Email" />
+            <Button className="h-10 rounded-full px-7">SEND</Button>
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-primary py-7 text-white">
+        <div className="figma-container flex flex-col items-center justify-between gap-5 md:flex-row">
+          <div className="flex items-center gap-3">
+            {[Github, Mail, Linkedin].map((Icon, index) => (
+              <a key={index} href="#" className="flex h-9 w-9 items-center justify-center rounded-full border border-white/60 text-white/90 transition-colors hover:bg-white hover:text-primary">
+                <Icon className="h-4 w-4" />
+              </a>
+            ))}
+          </div>
+          <p className="text-sm text-white/75">2026 All Rights Reserved</p>
+          <div className="flex gap-3">
+            <Button variant="outline" size="sm" className="rounded-full border-white/70 bg-transparent text-white hover:bg-white hover:text-primary">
+              Terms & Condition
+            </Button>
+            <Button variant="outline" size="sm" className="rounded-full border-white/70 bg-transparent text-white hover:bg-white hover:text-primary">
+              Privacy Policy
+            </Button>
           </div>
         </div>
       </div>

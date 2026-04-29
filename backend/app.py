@@ -16,7 +16,6 @@ import config
 import subprocess
 import time
 import requests
-from transformers import ViTForImageClassification
 
 # <--- NEW IMPORTS --->
 from xray_filter import classify_scan
@@ -57,6 +56,34 @@ def check_and_start_ollama():
         except FileNotFoundError:
              print("\n❌ 'ollama' command not found. Is it installed?")
 
+def _normalized_ollama_model_name():
+    model_name = config.OLLAMA_MODEL
+    if model_name.startswith("ollama/"):
+        model_name = model_name.split("/", 1)[1]
+    return model_name
+
+def _get_ollama_status():
+    model_name = _normalized_ollama_model_name()
+    try:
+        response = requests.get(f"{config.BASE_URL}/api/tags", timeout=2)
+        response.raise_for_status()
+        models = response.json().get("models", [])
+        model_names = [m.get("name") for m in models if m.get("name")]
+        return {
+            "ollama_running": True,
+            "ollama_model": model_name,
+            "ollama_model_available": model_name in model_names,
+            "ollama_available_models": model_names,
+        }
+    except Exception as exc:
+        return {
+            "ollama_running": False,
+            "ollama_model": model_name,
+            "ollama_model_available": False,
+            "ollama_error": str(exc),
+            "ollama_available_models": [],
+        }
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     import gc
@@ -69,9 +96,6 @@ async def lifespan(app: FastAPI):
     
     check_and_start_ollama()
     
-    global model
-    print("Loading Global Vision Model (ViT)...")
-    model = ViTForImageClassification.from_pretrained("google/vit-base-patch16-224")
     device = vision_encoder.device
     print(f"\n🚀 STARTUP: Loading AI Models on {device}...")
     
@@ -160,26 +184,35 @@ async def synthesize_report(
         vision_agent=agents["vision"],
         retrieval_agent=agents["retrieval"],
         reports_dict=reports_dict,
-        image_paths=image_paths
+        image_paths=image_paths,
+        scan_type=scan_type
     )
 
     async def process_stream(generator):
-        async for chunk in generator:
-            try:
-                data = json.loads(chunk)
-                if data.get("status") == "complete":
-                    exp_path = data.get("explainable_image_path")
-                    if exp_path and os.path.exists(exp_path) and exp_path != "Normal - No highlights needed":
-                        with open(exp_path, "rb") as f:
-                            b64_data = base64.b64encode(f.read()).decode("utf-8")
-                        data["heatmap"] = f"data:image/png;base64,{b64_data}"
+        try:
+            async for chunk in generator:
+                try:
+                    data = json.loads(chunk)
+                    if data.get("status") == "complete":
+                        exp_path = data.get("explainable_image_path")
+                        if exp_path and os.path.exists(exp_path) and exp_path != "Normal - No highlights needed":
+                            with open(exp_path, "rb") as f:
+                                b64_data = base64.b64encode(f.read()).decode("utf-8")
+                            data["heatmap"] = f"data:image/png;base64,{b64_data}"
+                        else:
+                            data["heatmap"] = None
+                        yield json.dumps(data) + "\n"
                     else:
-                        data["heatmap"] = None
-                    yield json.dumps(data) + "\n"
-                else:
+                        yield chunk
+                except Exception:
                     yield chunk
-            except Exception:
-                yield chunk
+        finally:
+            for path in image_paths:
+                try:
+                    if os.path.exists(path):
+                        os.remove(path)
+                except Exception as cleanup_error:
+                    print(f"⚠️ Could not clean upload temp file {path}: {cleanup_error}")
 
     return StreamingResponse(
         process_stream(report_generator), 
@@ -207,6 +240,11 @@ async def health():
         "memory_total_mb": round(mem.total / (1024 ** 2)),
         "gpu_available": _torch.cuda.is_available(),
     }
+    ollama_status = _get_ollama_status()
+    result.update(ollama_status)
+    if not ollama_status["ollama_running"] or not ollama_status["ollama_model_available"]:
+        result["status"] = "degraded"
+        result["message"] = f"Ollama model '{ollama_status['ollama_model']}' is not available. Pull it or update config.OLLAMA_MODEL."
     if _torch.cuda.is_available():
         result["gpu_name"] = _torch.cuda.get_device_name(0)
         result["gpu_memory_used_mb"] = round(_torch.cuda.memory_allocated(0) / (1024 ** 2))

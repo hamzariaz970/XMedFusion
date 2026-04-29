@@ -8,9 +8,9 @@ interface LayoutProps {
 
 export const Layout = ({ children }: LayoutProps) => {
   return (
-    <div className="min-h-screen flex flex-col">
+    <div className="clinical-shell min-h-screen flex flex-col">
       <Navbar />
-      <main className="flex-1 pt-16">
+      <main className="flex-1 pt-20 animate-route-in">
         {children}
       </main>
       <Footer />

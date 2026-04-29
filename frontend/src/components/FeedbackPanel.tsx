@@ -35,6 +35,7 @@ interface EditableReport {
 }
 
 interface KGEntity {
+  sourceIndex: number;
   label: string;
   type: string;
   included: boolean;
@@ -46,7 +47,7 @@ interface FeedbackPanelProps {
 
 // ---------- Component ----------
 const FeedbackPanel = ({ onReAnalyze }: FeedbackPanelProps) => {
-  const { report, knowledgeGraphData, feedbackStatus, setFeedbackStatus } = useAnalysis();
+  const { report, knowledgeGraphData, currentScanId, feedbackStatus, setFeedbackStatus } = useAnalysis();
 
   // Local editable state
   const [edited, setEdited] = useState<EditableReport>({
@@ -81,7 +82,8 @@ const FeedbackPanel = ({ onReAnalyze }: FeedbackPanelProps) => {
   useEffect(() => {
     if (!knowledgeGraphData?.entities) return;
     const mapped: KGEntity[] = knowledgeGraphData.entities.map(
-      ([label, type]: [string, string]) => ({
+      ([label, type]: [string, string], index: number) => ({
+        sourceIndex: index,
         label,
         type,
         included: true,
@@ -112,26 +114,79 @@ const FeedbackPanel = ({ onReAnalyze }: FeedbackPanelProps) => {
   const removeEntity = (idx: number) =>
     setEntities((prev) => prev.filter((_, i) => i !== idx));
 
+  const buildReviewedKnowledgeGraph = () => {
+    if (!knowledgeGraphData?.entities) return null;
+
+    const includedIndexes = new Set(
+      entities.filter((entity) => entity.included).map((entity) => entity.sourceIndex)
+    );
+    const indexMap = new Map<number, number>();
+    const reviewedEntities = knowledgeGraphData.entities
+      .map((entity: [string, string], sourceIndex: number) => ({ entity, sourceIndex }))
+      .filter(({ sourceIndex }: { sourceIndex: number }) => includedIndexes.has(sourceIndex))
+      .map(({ entity, sourceIndex }: { entity: [string, string]; sourceIndex: number }, newIndex: number) => {
+        indexMap.set(sourceIndex, newIndex);
+        return entity;
+      });
+
+    const reviewedRelations = (knowledgeGraphData.relations || [])
+      .filter(([source, target]: [number, number, string]) => includedIndexes.has(source) && includedIndexes.has(target))
+      .map(([source, target, relation]: [number, number, string]) => [
+        indexMap.get(source),
+        indexMap.get(target),
+        relation,
+      ])
+      .filter(([source, target]: [number | undefined, number | undefined, string]) => source !== undefined && target !== undefined);
+
+    return {
+      ...knowledgeGraphData,
+      entities: reviewedEntities,
+      relations: reviewedRelations,
+    };
+  };
+
   // --- Save/Approve ---
   const handleSave = async (status: FeedbackStatus) => {
     setSaving(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("Not authenticated");
+
+      const reviewedKg = buildReviewedKnowledgeGraph();
       const payload = {
-        doctor_id: user?.id || null,
+        doctor_id: user.id,
+        scan_id: currentScanId,
         original_findings: report?.findings || "",
         edited_findings: edited.findings,
         original_impression: report?.impression || "",
         edited_impression: edited.impression,
         edited_recommendation: edited.recommendation,
         edited_labels: edited.labels,
-        edited_kg: entities.filter((e) => e.included).map((e) => ({ label: e.label, type: e.type })),
+        edited_kg: reviewedKg,
         doctor_notes: doctorNotes,
         status: status === "approved" ? "approved" : "draft",
       };
 
+      if (currentScanId) {
+        const { error: scanUpdateError } = await supabase
+          .from("medical_scans")
+          .update({
+            findings: edited.findings,
+            impression: edited.impression,
+            recommendation: edited.recommendation || null,
+            labels: edited.labels,
+            kg_data: reviewedKg || knowledgeGraphData || null,
+          })
+          .eq("id", currentScanId)
+          .eq("user_id", user.id);
+
+        if (scanUpdateError) throw scanUpdateError;
+      }
+
       const { error } = await supabase.from("feedback").insert(payload);
-      if (error) throw error;
+      if (error) {
+        console.warn("Feedback audit insert skipped:", error.message);
+      }
 
       setFeedbackStatus(status);
       toast.success(
@@ -149,7 +204,7 @@ const FeedbackPanel = ({ onReAnalyze }: FeedbackPanelProps) => {
   // Already approved
   if (feedbackStatus === "approved") {
     return (
-      <Card className="border-primary/30 bg-primary/5 backdrop-blur animate-in fade-in duration-300">
+      <Card className="surface-card border-primary/30 bg-primary/5 backdrop-blur animate-in fade-in duration-300">
         <CardContent className="py-8">
           <div className="text-center">
             <CheckCircle className="w-12 h-12 mx-auto mb-3 text-primary" />
@@ -177,10 +232,10 @@ const FeedbackPanel = ({ onReAnalyze }: FeedbackPanelProps) => {
     title: string;
     children: React.ReactNode;
   }) => (
-    <div className="border border-border/50 rounded-lg overflow-hidden">
+    <div className="overflow-hidden rounded-[22px] border border-border/50 bg-white/70">
       <button
         onClick={() => toggleSection(id)}
-        className="w-full flex items-center justify-between px-4 py-3 bg-muted/30 hover:bg-muted/50 transition-colors"
+        className="flex w-full items-center justify-between bg-secondary/40 px-4 py-3 transition-colors hover:bg-primary/10"
       >
         <span className="flex items-center gap-2 text-sm font-semibold text-foreground">
           <Icon className="w-4 h-4 text-primary" />
@@ -197,8 +252,8 @@ const FeedbackPanel = ({ onReAnalyze }: FeedbackPanelProps) => {
   );
 
   return (
-    <Card className="border-primary/20 shadow-xl animate-in fade-in slide-in-from-bottom-4 duration-500 backdrop-blur">
-      <div className="h-1 bg-gradient-to-r from-amber-400 via-primary to-amber-400" />
+    <Card className="surface-card border-primary/20 shadow-xl animate-in fade-in slide-in-from-bottom-4 duration-500 backdrop-blur">
+      <div className="h-1 bg-gradient-to-r from-primary via-blue-300 to-primary" />
       <CardHeader className="pb-3">
         <CardTitle className="flex items-center gap-2 text-lg">
           <UserCheck className="w-5 h-5 text-primary" />
@@ -220,7 +275,7 @@ const FeedbackPanel = ({ onReAnalyze }: FeedbackPanelProps) => {
               value={edited.findings}
               onChange={(e) => setEdited((p) => ({ ...p, findings: e.target.value }))}
               rows={5}
-              className="bg-background/50 text-sm leading-relaxed resize-y"
+              className="bg-white/70 text-sm leading-relaxed resize-y"
             />
           </div>
           <div>
@@ -231,7 +286,7 @@ const FeedbackPanel = ({ onReAnalyze }: FeedbackPanelProps) => {
               value={edited.impression}
               onChange={(e) => setEdited((p) => ({ ...p, impression: e.target.value }))}
               rows={3}
-              className="bg-background/50 text-sm leading-relaxed resize-y"
+              className="bg-white/70 text-sm leading-relaxed resize-y"
             />
           </div>
           <div>
@@ -242,7 +297,7 @@ const FeedbackPanel = ({ onReAnalyze }: FeedbackPanelProps) => {
               value={edited.recommendation}
               onChange={(e) => setEdited((p) => ({ ...p, recommendation: e.target.value }))}
               rows={2}
-              className="bg-background/50 text-sm leading-relaxed resize-y"
+              className="bg-white/70 text-sm leading-relaxed resize-y"
             />
           </div>
         </Section>
@@ -271,7 +326,7 @@ const FeedbackPanel = ({ onReAnalyze }: FeedbackPanelProps) => {
               onChange={(e) => setNewLabel(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && addLabel()}
               placeholder="Add label..."
-              className="bg-background/50 text-sm flex-1"
+              className="bg-white/70 text-sm flex-1"
             />
             <Button variant="outline" size="sm" onClick={addLabel} className="gap-1">
               <Plus className="w-3 h-3" /> Add
@@ -287,10 +342,10 @@ const FeedbackPanel = ({ onReAnalyze }: FeedbackPanelProps) => {
                 <div
                   key={i}
                   className={cn(
-                    "flex items-center justify-between px-3 py-2 rounded-md border transition-all text-sm",
+                    "flex items-center justify-between rounded-[18px] border px-3 py-2 text-sm transition-all",
                     ent.included
-                      ? "bg-background/50 border-border/50"
-                      : "bg-muted/30 border-border/20 opacity-60 line-through"
+                      ? "bg-white/70 border-border/50"
+                      : "bg-secondary/40 border-border/20 opacity-60 line-through"
                   )}
                 >
                   <div className="flex items-center gap-2">
@@ -336,7 +391,7 @@ const FeedbackPanel = ({ onReAnalyze }: FeedbackPanelProps) => {
             onChange={(e) => setDoctorNotes(e.target.value)}
             rows={3}
             placeholder="Additional clinical context, corrections rationale, or observations..."
-            className="bg-background/50 text-sm resize-y"
+            className="bg-white/70 text-sm resize-y"
           />
         </Section>
 

@@ -17,10 +17,12 @@ interface AnalysisContextType {
   report: ParsedReport | null;
   knowledgeGraphData: any | null; 
   heatmapData: string | null;
+  currentScanId: string | null;
 
   // HITL Feedback
   feedbackStatus: FeedbackStatus;
   setFeedbackStatus: (s: FeedbackStatus) => void;
+  setCurrentScanId: (scanId: string | null) => void;
   
   // Actions
   setAnalysisResults: (
@@ -28,7 +30,8 @@ interface AnalysisContextType {
     url: string, 
     report: ParsedReport, 
     kgData: any,
-    heatmap: string | null
+    heatmap: string | null,
+    scanId?: string | null
   ) => void;
   
   resetAnalysis: () => void;
@@ -42,6 +45,7 @@ export const AnalysisProvider = ({ children }: { children: ReactNode }) => {
   const [report, setReport] = useState<ParsedReport | null>(null);
   const [knowledgeGraphData, setKgData] = useState<any | null>(null);
   const [heatmapData, setHeatmapData] = useState<string | null>(null);
+  const [currentScanId, setCurrentScanId] = useState<string | null>(null);
   const [feedbackStatus, setFeedbackStatus] = useState<FeedbackStatus>('none');
 
   const setAnalysisResults = (
@@ -49,13 +53,15 @@ export const AnalysisProvider = ({ children }: { children: ReactNode }) => {
     url: string, 
     reportData: ParsedReport, 
     kgData: any,
-    heatmap: string | null
+    heatmap: string | null,
+    scanId: string | null = null
   ) => {
     setUploadedFile(file);
     setPreviewUrl(url);
     setReport(reportData);
     setKgData(kgData);
     setHeatmapData(heatmap);
+    setCurrentScanId(scanId);
     setFeedbackStatus('none');
   };
 
@@ -66,6 +72,7 @@ export const AnalysisProvider = ({ children }: { children: ReactNode }) => {
     setReport(null);
     setKgData(null);
     setHeatmapData(null);
+    setCurrentScanId(null);
     setFeedbackStatus('none');
   };
 
@@ -76,8 +83,10 @@ export const AnalysisProvider = ({ children }: { children: ReactNode }) => {
       report, 
       knowledgeGraphData, 
       heatmapData,
+      currentScanId,
       feedbackStatus,
       setFeedbackStatus,
+      setCurrentScanId,
       setAnalysisResults, 
       resetAnalysis 
     }}>

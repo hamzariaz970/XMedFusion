@@ -6,54 +6,62 @@
 
 @layer base {
   :root {
-    --background: 210 20% 98%;
-    --foreground: 210 40% 11%;
+    --background: 0 0% 99%;
+    --foreground: 225 12% 16%;
 
     --card: 0 0% 100%;
-    --card-foreground: 210 40% 11%;
+    --card-foreground: 225 12% 16%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 210 40% 11%;
+    --popover-foreground: 225 12% 16%;
 
-    --primary: 187 85% 43%;
+    --primary: 225 67% 66%;
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 210 40% 96%;
-    --secondary-foreground: 210 40% 11%;
+    --secondary: 224 56% 95%;
+    --secondary-foreground: 225 12% 16%;
 
-    --muted: 210 30% 95%;
-    --muted-foreground: 210 20% 45%;
+    --muted: 220 18% 94%;
+    --muted-foreground: 226 8% 42%;
 
-    --accent: 220 70% 55%;
+    --accent: 206 77% 44%;
     --accent-foreground: 0 0% 100%;
 
     --destructive: 0 84% 60%;
     --destructive-foreground: 0 0% 100%;
 
-    --border: 210 20% 90%;
-    --input: 210 20% 90%;
-    --ring: 187 85% 43%;
+    --border: 225 18% 88%;
+    --input: 225 18% 88%;
+    --ring: 225 67% 66%;
 
-    --radius: 0.75rem;
+    --radius: 0.5rem;
 
     /* Custom medical theme colors */
-    --medical-teal: 187 85% 43%;
-    --medical-teal-light: 187 85% 95%;
-    --medical-blue: 220 70% 55%;
-    --medical-blue-light: 220 70% 95%;
+    --medical-teal: 206 77% 44%;
+    --medical-teal-light: 206 56% 93%;
+    --medical-blue: 225 67% 66%;
+    --medical-blue-light: 225 70% 94%;
     --medical-success: 160 60% 45%;
     --medical-warning: 45 93% 47%;
+    --success: 160 60% 45%;
+    --warning: 40 78% 48%;
+    --clinical-ink: 225 12% 16%;
+    --clinical-steel: 214 18% 67%;
+    --clinical-copper: 34 24% 58%;
+    --clinical-veil: 203 22% 76%;
 
     /* Gradients */
-    --gradient-primary: linear-gradient(135deg, hsl(187 85% 43%) 0%, hsl(220 70% 55%) 100%);
-    --gradient-hero: linear-gradient(135deg, hsl(187 85% 50% / 0.1) 0%, hsl(220 70% 60% / 0.1) 100%);
-    --gradient-card: linear-gradient(180deg, hsl(0 0% 100%) 0%, hsl(210 30% 98%) 100%);
+    --gradient-primary: linear-gradient(135deg, hsl(225 67% 66%) 0%, hsl(217 72% 62%) 62%, hsl(206 77% 44%) 100%);
+    --gradient-hero: linear-gradient(135deg, hsl(226 20% 71%) 0%, hsl(198 32% 72%) 42%, hsl(88 13% 76%) 100%);
+    --gradient-card: linear-gradient(180deg, hsl(0 0% 100% / 0.98) 0%, hsl(224 56% 97% / 0.9) 100%);
+    --gradient-clinical-dark: linear-gradient(135deg, hsl(225 12% 16%) 0%, hsl(226 32% 26%) 58%, hsl(225 67% 56%) 100%);
+    --gradient-sheen: linear-gradient(120deg, transparent 0%, hsl(0 0% 100% / 0.26) 45%, transparent 70%);
 
     /* Shadows */
-    --shadow-sm: 0 1px 2px hsl(210 20% 50% / 0.05);
-    --shadow-md: 0 4px 12px hsl(210 20% 50% / 0.1);
-    --shadow-lg: 0 8px 30px hsl(210 20% 50% / 0.12);
-    --shadow-glow: 0 0 40px hsl(187 85% 43% / 0.15);
+    --shadow-sm: 0 1px 2px hsl(188 16% 11% / 0.06);
+    --shadow-md: 0 12px 32px hsl(225 12% 16% / 0.08);
+    --shadow-lg: 0 28px 80px hsl(225 12% 16% / 0.13);
+    --shadow-glow: 0 22px 60px hsl(225 67% 66% / 0.25);
 
     --sidebar-background: 0 0% 98%;
     --sidebar-foreground: 240 5.3% 26.1%;
@@ -112,11 +120,28 @@
 
   html {
     scroll-behavior: smooth;
+    width: 100%;
+    overflow-x: hidden;
   }
 
   body {
     @apply bg-background text-foreground font-sans antialiased;
     font-family: 'Plus Jakarta Sans', sans-serif;
+    min-height: 100vh;
+    width: 100%;
+    overflow-x: hidden;
+    background:
+      linear-gradient(180deg, hsl(224 56% 97%) 0%, hsl(0 0% 100%) 42%, hsl(224 56% 96%) 100%);
+  }
+
+  #root {
+    min-height: 100vh;
+    width: 100%;
+    overflow-x: hidden;
+  }
+
+  ::selection {
+    background: hsl(var(--primary) / 0.18);
   }
 }
 
@@ -129,16 +154,406 @@
   }
 
   .glass-card {
-    @apply bg-card/80 backdrop-blur-xl border border-border/50;
+    @apply bg-card/90 backdrop-blur-2xl border border-white/70;
     box-shadow: var(--shadow-md);
+    border-radius: 28px;
+  }
+
+  .surface-card {
+    @apply relative overflow-hidden border border-border/60 bg-white/90 backdrop-blur-xl shadow-card transition-all duration-300;
+    border-radius: 26px;
+  }
+
+  .surface-card:hover {
+    transform: translateY(-3px);
+    box-shadow: var(--shadow-lg);
+  }
+
+  .surface-card::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: linear-gradient(135deg, hsl(0 0% 100% / 0.7), transparent 42%);
+    opacity: 0.7;
+  }
+
+  .clinical-shell {
+    position: relative;
+    isolation: isolate;
+    width: 100%;
+    overflow-x: hidden;
+    background:
+      linear-gradient(180deg, hsl(224 56% 97%) 0%, hsl(0 0% 100%) 42%, hsl(224 56% 96%) 100%);
+  }
+
+  .clinical-shell::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -2;
+    pointer-events: none;
+    background:
+      linear-gradient(hsl(225 67% 66% / 0.08) 1px, transparent 1px),
+      linear-gradient(90deg, hsl(225 67% 66% / 0.08) 1px, transparent 1px);
+    background-size: 56px 56px;
+    mask-image: linear-gradient(to bottom, black, transparent 56%);
+  }
+
+  .clinical-shell::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background:
+      linear-gradient(115deg, transparent 0%, hsl(225 67% 66% / 0.1) 18%, transparent 38%),
+      linear-gradient(245deg, transparent 0%, hsl(206 77% 44% / 0.1) 28%, transparent 55%);
+  }
+
+  .clinical-section {
+    @apply relative overflow-hidden;
+  }
+
+  .clinical-panel {
+    @apply border border-white/70 bg-white/90 shadow-card backdrop-blur-xl;
+    border-radius: 28px;
+  }
+
+  .clinical-dark-panel {
+    background: var(--gradient-clinical-dark);
+    color: hsl(var(--primary-foreground));
+    box-shadow: var(--shadow-lg);
+    border-radius: 28px;
+  }
+
+  .eyebrow {
+    @apply inline-flex items-center gap-2 rounded-full border border-primary/15 bg-white/80 px-3.5 py-1.5 text-xs font-bold uppercase text-primary shadow-sm backdrop-blur;
+  }
+
+  .metric-card {
+    @apply border border-border/60 bg-white/90 p-4 shadow-sm backdrop-blur transition-all duration-300 hover:-translate-y-1 hover:border-primary/30 hover:shadow-card;
+    border-radius: 24px;
+  }
+
+  .medical-chip {
+    @apply inline-flex items-center gap-1.5 rounded-full border border-primary/15 bg-primary/10 px-3 py-1 text-xs font-semibold text-primary;
+  }
+
+  .figma-page-shell {
+    @apply w-full max-w-none px-0 py-8 sm:px-4 md:px-6 md:py-14 lg:px-8 xl:px-10;
+    animation: routeIn 0.55s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+
+  .figma-workspace-hero {
+    @apply relative overflow-hidden border border-white/80 bg-white/90 p-6 shadow-card md:p-8;
+    border-radius: 0;
+  }
+
+  @media (min-width: 640px) {
+    .figma-workspace-hero {
+      border-radius: 34px;
+    }
+  }
+
+  .figma-workspace-hero::before {
+    content: "";
+    position: absolute;
+    inset: auto -8% -42% 36%;
+    height: 210px;
+    border-radius: 999px;
+    background:
+      radial-gradient(circle at 20% 45%, hsl(0 0% 100% / 0.68), transparent 19%),
+      linear-gradient(135deg, hsl(225 67% 66% / 0.18), hsl(206 77% 44% / 0.12));
+    transform: rotate(-7deg);
+    pointer-events: none;
+  }
+
+  .figma-workspace-hero > * {
+    position: relative;
+    z-index: 1;
+  }
+
+  .figma-tool-panel {
+    @apply border border-primary/10 bg-primary/5 shadow-sm;
+    border-radius: 24px;
+  }
+
+  .status-dot {
+    @apply relative inline-flex h-2.5 w-2.5 rounded-full bg-primary;
+  }
+
+  .status-dot::after {
+    content: "";
+    @apply absolute inset-0 rounded-full bg-primary;
+    animation: pingSoft 1.8s cubic-bezier(0, 0, 0.2, 1) infinite;
   }
 
   .hero-gradient {
     background: var(--gradient-hero);
   }
 
+  .figma-page {
+    @apply w-full bg-transparent text-foreground;
+  }
+
+  .figma-container {
+    @apply w-full max-w-none px-4 sm:px-5 md:px-6 lg:px-8 xl:px-10;
+  }
+
+  .figma-section {
+    @apply py-12 md:py-16 xl:py-20;
+  }
+
+  .figma-hero {
+    background:
+      radial-gradient(circle at 66% 16%, hsl(0 0% 100% / 0.4), transparent 28%),
+      radial-gradient(circle at 36% 75%, hsl(52 55% 82% / 0.22), transparent 22%),
+      linear-gradient(135deg, hsl(228 20% 70%) 0%, hsl(204 25% 76%) 48%, hsl(216 18% 84%) 100%);
+    box-shadow: inset 0 1px 0 hsl(0 0% 100% / 0.28), 0 26px 80px hsl(225 12% 16% / 0.12);
+  }
+
+  .figma-hero::before {
+    content: "";
+    position: absolute;
+    inset: -30%;
+    background:
+      radial-gradient(ellipse at center, transparent 52%, hsl(225 67% 66% / 0.22) 53%, transparent 57%),
+      radial-gradient(ellipse at center, transparent 58%, hsl(64 52% 80% / 0.34) 59%, transparent 62%);
+    transform: rotate(-15deg);
+    opacity: 0.85;
+  }
+
+  .soft-image-card {
+    @apply overflow-hidden bg-muted shadow-card;
+    border-radius: 34px;
+  }
+
+  .blob-card {
+    border-radius: 34px 34px 96px 34px;
+  }
+
+  .circle-button {
+    @apply inline-flex h-14 w-14 items-center justify-center rounded-full bg-primary text-white shadow-glow transition-all duration-300 hover:-translate-y-1 hover:scale-105;
+  }
+
+  .blue-panel {
+    @apply relative bg-primary text-white shadow-card;
+    border-radius: 34px 34px 96px 34px;
+  }
+
+  .figma-stat {
+    @apply text-5xl font-extrabold leading-none text-primary md:text-6xl;
+  }
+
+  .med-object {
+    filter: drop-shadow(0 22px 24px hsl(225 12% 16% / 0.2));
+  }
+
+  .medical-shield {
+    width: 150px;
+    height: 165px;
+    border-radius: 44% 44% 54% 54%;
+    background: linear-gradient(135deg, hsl(0 0% 100%) 0%, hsl(218 16% 78%) 100%);
+    clip-path: polygon(50% 0, 90% 16%, 84% 73%, 50% 100%, 16% 73%, 10% 16%);
+    position: relative;
+  }
+
+  .medical-shield::before,
+  .medical-shield::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    border-radius: 10px;
+    background: hsl(var(--primary));
+    box-shadow: inset 0 -4px 8px hsl(225 12% 16% / 0.18);
+    transform: translate(-50%, -50%);
+  }
+
+  .medical-shield::before {
+    width: 72px;
+    height: 24px;
+  }
+
+  .medical-shield::after {
+    width: 24px;
+    height: 72px;
+  }
+
+  .pill-3d {
+    width: 180px;
+    height: 88px;
+    border-radius: 999px;
+    background: linear-gradient(90deg, hsl(0 0% 94%) 0 46%, hsl(var(--primary)) 47% 100%);
+    transform: rotate(38deg);
+    box-shadow: inset -18px -18px 28px hsl(225 12% 16% / 0.2), inset 14px 14px 22px hsl(0 0% 100% / 0.42);
+  }
+
+  .capsule-small {
+    width: 110px;
+    height: 50px;
+    border-radius: 999px;
+    background: linear-gradient(90deg, hsl(var(--primary)) 0 48%, hsl(0 0% 96%) 49% 100%);
+    transform: rotate(42deg);
+    box-shadow: inset -10px -10px 18px hsl(225 12% 16% / 0.14);
+  }
+
+  .molecule {
+    position: relative;
+    width: 150px;
+    height: 150px;
+  }
+
+  .molecule span {
+    position: absolute;
+    width: 32px;
+    height: 32px;
+    border-radius: 999px;
+    background: linear-gradient(135deg, hsl(232 68% 72%), hsl(225 58% 49%));
+    box-shadow: inset -7px -7px 12px hsl(225 12% 16% / 0.18);
+  }
+
+  .molecule::before {
+    content: "";
+    position: absolute;
+    inset: 35px;
+    border-radius: 999px;
+    background: radial-gradient(circle at 34% 28%, white, hsl(216 18% 82%));
+    box-shadow: 0 14px 26px hsl(225 12% 16% / 0.18);
+  }
+
+  .molecule i {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 90px;
+    height: 7px;
+    border-radius: 999px;
+    background: hsl(var(--primary) / 0.55);
+    transform-origin: left center;
+  }
+
+  .dna-3d {
+    position: relative;
+    width: 120px;
+    height: 170px;
+  }
+
+  .dna-3d::before,
+  .dna-3d::after {
+    content: "";
+    position: absolute;
+    inset: 0 42px;
+    border: 12px solid hsl(var(--primary));
+    border-left-color: transparent;
+    border-bottom-color: transparent;
+    border-radius: 999px;
+    transform: rotate(22deg);
+  }
+
+  .dna-3d::after {
+    transform: rotate(202deg);
+  }
+
+  .dna-3d span {
+    position: absolute;
+    left: 30px;
+    width: 70px;
+    height: 10px;
+    border-radius: 999px;
+    background: hsl(0 0% 96% / 0.86);
+    transform: rotate(-28deg);
+  }
+
   .glow-effect {
     box-shadow: var(--shadow-glow);
+  }
+
+  .radiology-image-card {
+    @apply relative isolate overflow-hidden bg-clinical-ink shadow-card;
+    border-radius: 30px;
+  }
+
+  .radiology-image-card::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    pointer-events: none;
+    border: 1px solid hsl(0 0% 100% / 0.35);
+    border-radius: inherit;
+  }
+
+  .radiology-image {
+    @apply h-full w-full object-cover;
+    min-height: inherit;
+    transform: scale(1.01);
+    transition: transform 700ms cubic-bezier(0.2, 0.8, 0.2, 1), filter 700ms ease;
+  }
+
+  .radiology-image-card:hover .radiology-image {
+    transform: scale(1.07);
+    filter: saturate(1.05) contrast(1.03);
+  }
+
+  .radiology-image-vignette {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    pointer-events: none;
+    background:
+      linear-gradient(to top, hsl(225 12% 16% / 0.72), transparent 48%),
+      linear-gradient(135deg, hsl(225 67% 66% / 0.12), transparent 46%);
+  }
+
+  .radiology-image-caption {
+    @apply absolute bottom-4 left-4 right-4 z-10 flex items-center justify-between gap-3 rounded-[22px] border border-white/25 bg-white/90 px-4 py-3 text-foreground shadow-card backdrop-blur-md;
+  }
+
+  .radiology-image-label {
+    @apply text-sm font-extrabold text-primary;
+  }
+
+  .radiology-image-copy {
+    @apply text-xs font-semibold text-muted-foreground;
+  }
+
+  .radiology-scan-line {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: -20%;
+    z-index: 3;
+    height: 38%;
+    pointer-events: none;
+    background: linear-gradient(to bottom, transparent, hsl(225 67% 66% / 0.26), transparent);
+    mix-blend-mode: screen;
+    animation: scanSweep 5.8s ease-in-out infinite;
+  }
+
+  .report-glass-panel {
+    @apply rounded-[24px] border border-white/80 bg-white/90 p-4 shadow-card backdrop-blur-xl;
+  }
+
+  .report-pulse-dot {
+    @apply relative inline-flex h-2.5 w-2.5 rounded-full bg-primary;
+  }
+
+  .report-pulse-dot::after {
+    content: "";
+    @apply absolute inset-0 rounded-full bg-primary;
+    animation: pingSoft 2s cubic-bezier(0, 0, 0.2, 1) infinite;
+  }
+
+  .workflow-card {
+    @apply rounded-[24px] border border-border/60 bg-white/90 p-5 shadow-sm transition-all duration-300;
+  }
+
+  .workflow-card:hover {
+    transform: translateY(-5px);
+    border-color: hsl(var(--primary) / 0.34);
+    box-shadow: var(--shadow-md);
   }
 }
 
@@ -162,6 +577,62 @@
   .animate-scale-in {
     animation: scaleIn 0.4s ease-out forwards;
   }
+
+  .animate-float-soft {
+    animation: floatSoft 7s ease-in-out infinite;
+  }
+
+  .animate-scan {
+    animation: scanLine 3.5s ease-in-out infinite;
+  }
+
+  .animate-sheen {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .animate-sheen::after {
+    content: "";
+    position: absolute;
+    inset: -40% -80%;
+    background: var(--gradient-sheen);
+    transform: translateX(-55%);
+    animation: sheen 4.2s ease-in-out infinite;
+    pointer-events: none;
+  }
+
+  .animate-route-in {
+    animation: routeIn 0.55s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+
+  .animate-drift {
+    animation: drift 9s ease-in-out infinite;
+  }
+
+  .animate-drift-delayed {
+    animation: drift 9s ease-in-out infinite;
+    animation-delay: 1.2s;
+  }
+
+  .hover-lift {
+    @apply transition-all duration-300 hover:-translate-y-1 hover:shadow-card-hover;
+  }
+
+  .stagger-1 {
+    animation-delay: 0.08s;
+  }
+
+  .stagger-2 {
+    animation-delay: 0.16s;
+  }
+
+  .stagger-3 {
+    animation-delay: 0.24s;
+  }
+
+  .animate-spin {
+    animation: spin 1s linear infinite !important;
+  }
 }
 
 @keyframes float {
@@ -170,6 +641,90 @@
   }
   50% {
     transform: translateY(-20px);
+  }
+}
+
+@keyframes floatSoft {
+  0%, 100% {
+    transform: translate3d(0, 0, 0) rotate(0deg);
+  }
+  50% {
+    transform: translate3d(0, -10px, 0) rotate(0.5deg);
+  }
+}
+
+@keyframes scanLine {
+  0%, 100% {
+    transform: translateY(-105%);
+    opacity: 0;
+  }
+  12%, 78% {
+    opacity: 1;
+  }
+  88% {
+    transform: translateY(105%);
+    opacity: 0;
+  }
+}
+
+@keyframes scanSweep {
+  0%, 52%, 100% {
+    transform: translateY(-120%);
+    opacity: 0;
+  }
+  12%, 40% {
+    opacity: 0.95;
+  }
+  48% {
+    transform: translateY(340%);
+    opacity: 0;
+  }
+}
+
+@keyframes drift {
+  0%, 100% {
+    transform: translate3d(0, 0, 0);
+  }
+  50% {
+    transform: translate3d(0, -12px, 0);
+  }
+}
+
+@keyframes sheen {
+  0%, 60% {
+    transform: translateX(-60%) rotate(10deg);
+    opacity: 0;
+  }
+  72% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(80%) rotate(10deg);
+    opacity: 0;
+  }
+}
+
+@keyframes pingSoft {
+  0% {
+    transform: scale(1);
+    opacity: 0.55;
+  }
+  75%, 100% {
+    transform: scale(2.35);
+    opacity: 0;
+  }
+}
+
+@keyframes routeIn {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.985);
+    filter: blur(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
   }
 }
 
@@ -220,4 +775,15 @@
 
 ::-webkit-scrollbar-thumb:hover {
   @apply bg-muted-foreground/50;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
 }

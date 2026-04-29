@@ -4,6 +4,8 @@ import { supabase } from "@/lib/supabaseClient";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { RadiologyImageCard } from "@/components/RadiologyImageCard";
+import { radiologyImages } from "@/assets/radiology";
 import {
   Card,
   CardContent,
@@ -20,7 +22,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  Activity,
   Mail,
   Lock,
   Loader2,
@@ -28,6 +29,7 @@ import {
   ShieldCheck,
   User,
   Stethoscope,
+  Plus,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/context/AuthContext";
@@ -42,6 +44,21 @@ const SPECIALIZATIONS = [
   "Orthopedics",
   "Pathology",
 ];
+
+const AUTH_ACTION_TIMEOUT_MS = 15000;
+
+const withAuthActionTimeout = async <T,>(promise: Promise<T>, message: string): Promise<T> => {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<T>((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(message)), AUTH_ACTION_TIMEOUT_MS);
+  });
+
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
+};
 
 const Login = () => {
   const [email, setEmail] = useState("");
@@ -67,10 +84,13 @@ const Login = () => {
         }
 
         // 1. Create auth user
-        const { data, error } = await supabase.auth.signUp({
-          email,
-          password,
-        });
+        const { data, error } = await withAuthActionTimeout(
+          supabase.auth.signUp({
+            email,
+            password,
+          }),
+          "Registration is taking longer than expected. Please try again."
+        );
         if (error) throw error;
 
         const userId = data.user?.id;
@@ -138,7 +158,7 @@ const Login = () => {
         if (data.session) {
           if (isPreApproved) {
             toast.success("Account created! You've been pre-approved by an admin.");
-            navigate("/upload");
+            navigate("/dashboard");
           } else {
             toast.info("Account created! Your registration is pending admin approval.");
             navigate("/pending");
@@ -150,10 +170,13 @@ const Login = () => {
         }
       } else {
         // --- SIGN IN ---
-        const { error } = await supabase.auth.signInWithPassword({
-          email,
-          password,
-        });
+        const { error } = await withAuthActionTimeout(
+          supabase.auth.signInWithPassword({
+            email,
+            password,
+          }),
+          "Sign in is taking longer than expected. Please try again."
+        );
         if (error) throw error;
 
         // Fetch role to decide where to navigate
@@ -180,7 +203,7 @@ const Login = () => {
             navigate("/admin");
           } else {
             toast.success("Welcome back to XMedFusion!");
-            navigate("/upload");
+            navigate("/dashboard");
           }
         }
       }
@@ -192,21 +215,50 @@ const Login = () => {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center relative overflow-hidden bg-background py-12 px-4 sm:px-6 lg:px-8">
-      {/* Background Orbs */}
-      <div className="absolute inset-0 overflow-hidden -z-10">
-        <div className="absolute top-1/4 -left-20 w-72 h-72 bg-primary/10 rounded-full blur-3xl animate-pulse-slow" />
-        <div
-          className="absolute bottom-1/4 -right-20 w-96 h-96 bg-medical-blue/10 rounded-full blur-3xl animate-pulse-slow"
-          style={{ animationDelay: "2s" }}
-        />
-      </div>
+    <div className="clinical-shell min-h-screen w-full">
+      <div className="grid min-h-screen w-full lg:grid-cols-[1.05fr_0.95fr]">
+        <div className="hidden animate-fade-in lg:block">
+          <div className="figma-hero relative flex h-full min-h-screen flex-col justify-center overflow-hidden rounded-none p-10 text-white shadow-clinical xl:p-14">
+            <div className="mb-10 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-white/70">
+              <span className="h-2 w-2 rounded-full bg-success" />
+              Secure access
+            </div>
+            <h1 className="max-w-2xl text-5xl font-extrabold leading-tight text-white xl:text-6xl">
+              Clinical AI, gated for verified care teams.
+            </h1>
+            <p className="mt-6 max-w-xl text-base leading-7 text-white/70">
+              Doctors can register for approval, admins can pre-approve trusted users, and every diagnostic workflow remains tied to a verified identity.
+            </p>
+            <RadiologyImageCard
+              src={radiologyImages.laptopReview}
+              alt="Radiology consultation with X-ray on laptop"
+              label="Verified workspace"
+              caption="Reports, evidence, and review"
+              className="mt-10 h-[42vh] min-h-[320px]"
+            />
+            <div className="mt-10 grid gap-3">
+              {[
+                { label: "Role-aware routing", icon: ShieldCheck },
+                { label: "Doctor specialization capture", icon: Stethoscope },
+                { label: "Protected diagnostic workspace", icon: Lock },
+              ].map((item) => (
+                <div key={item.label} className="flex items-center gap-3 rounded-[22px] border border-white/15 bg-white/15 p-4 backdrop-blur">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-white/15 text-white">
+                    <item.icon className="h-5 w-5" />
+                  </div>
+                  <span className="text-sm font-semibold text-white">{item.label}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
 
-      <div className="w-full max-w-md space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
-        <div className="text-center">
+        <div className="flex min-h-screen w-full items-center justify-center px-0 py-0 sm:px-6 sm:py-8 lg:px-10 xl:px-14">
+        <div className="w-full space-y-7 animate-in fade-in slide-in-from-bottom-4 duration-700 sm:max-w-[560px]">
+        <div className="px-4 pt-8 text-center sm:px-0 sm:pt-0 lg:text-left">
           <Link to="/" className="inline-flex items-center gap-2 mb-6 group">
-            <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center text-primary-foreground shadow-glow group-hover:scale-110 transition-transform">
-              <Activity className="w-6 h-6" />
+            <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-br from-sky-600 to-primary text-primary-foreground shadow-glow transition-transform group-hover:scale-110">
+              <Plus className="w-6 h-6 stroke-[4]" />
             </div>
             <span className="text-2xl font-bold tracking-tight text-foreground">
               XMed<span className="text-primary">Fusion</span>
@@ -220,9 +272,16 @@ const Login = () => {
               ? "Fill in your details to request platform access."
               : "Precision AI for modern radiology."}
           </p>
+          <RadiologyImageCard
+            src={radiologyImages.laptopReview}
+            alt="Radiology consultation with X-ray on laptop"
+            label="Verified workspace"
+            caption="Reports, evidence, and review"
+            className="mt-6 h-52 lg:hidden"
+          />
         </div>
 
-        <Card className="glass-card border-border/50 shadow-2xl">
+        <Card className="clinical-panel w-full rounded-none shadow-clinical sm:rounded-[28px]">
           <CardHeader className="space-y-1">
             <CardTitle className="text-xl flex items-center gap-2">
               <ShieldCheck className="w-5 h-5 text-primary" />
@@ -329,7 +388,10 @@ const Login = () => {
                 disabled={loading}
               >
                 {loading ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <>
+                    <Loader2 className="mr-2 w-4 h-4 animate-spin" />
+                    {isSignUp ? "Registering..." : "Signing in..."}
+                  </>
                 ) : (
                   <>
                     {isSignUp ? "Submit Registration" : "Sign In"}
@@ -356,7 +418,7 @@ const Login = () => {
           </form>
         </Card>
 
-        <p className="text-center text-xs text-muted-foreground px-8">
+        <p className="px-4 pb-8 text-center text-xs text-muted-foreground sm:pb-0 lg:text-left">
           By clicking continue, you agree to our{" "}
           <button className="underline underline-offset-4 hover:text-primary">
             Terms of Service
@@ -367,6 +429,8 @@ const Login = () => {
           </button>
           .
         </p>
+        </div>
+      </div>
       </div>
     </div>
   );

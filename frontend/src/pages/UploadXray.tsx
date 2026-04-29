@@ -1,7 +1,10 @@
 import { useState, useCallback, useEffect } from "react";
 import { Layout } from "@/components/layout/Layout";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { RadiologyImageCard } from "@/components/RadiologyImageCard";
+import { radiologyImages } from "@/assets/radiology";
 import { Progress } from "@/components/ui/progress";
 import {
   Upload,
@@ -39,6 +42,7 @@ import { usePatientContext } from "@/context/PatientContext";
 import FeedbackPanel from "@/components/FeedbackPanel";
 import KnowledgeGraph from "@/components/KnowledgeGraph";
 import { supabase } from "@/lib/supabaseClient";
+import { toast } from "sonner";
 
 type ProcessingStep = 'idle' | 'uploading' | 'analyzing' | 'complete';
 type ScanType = 'auto' | 'xray' | 'ct';
@@ -73,10 +77,11 @@ const UploadXray = () => {
     report,
     knowledgeGraphData,
     setAnalysisResults,
+    setCurrentScanId,
     resetAnalysis
   } = useAnalysis();
 
-  const { selectedPatient, pendingUploadFiles, setPendingUploadFiles, pendingScanType, setPendingScanType } = usePatientContext();
+  const { selectedPatient, pendingUploadFiles, setPendingUploadFiles, pendingScanType, setPendingScanType, refreshPatients } = usePatientContext();
 
   const [tempFiles, setTempFiles] = useState<File[]>([]);
   const [tempPreviews, setTempPreviews] = useState<string[]>([]);
@@ -196,6 +201,7 @@ const UploadXray = () => {
             else if (data.status === "complete") {
               finishedSuccessfully = true;
               const parsedReport = parseReportText(data.final_report);
+              const persistedScanType = data.detected_modality || (scanType === "auto" ? "unknown" : scanType);
               // Set analysis results to use the first image for the main report view card
               setAnalysisResults(fileArray[0], newPreviews[0], parsedReport, data.knowledge_graph, data.heatmap);
               setTempFiles([]);
@@ -229,6 +235,10 @@ const UploadXray = () => {
                     .from('medical-images')
                     .upload(`${user.id}/${origFileName}`, currentFile);
 
+                  if (origErr) {
+                    throw new Error(`Failed to upload scan image ${i + 1}: ${origErr.message}`);
+                  }
+
                   if (!origErr && origData) {
                     const { data: pubOrig } = supabase.storage
                       .from('medical-images')
@@ -258,6 +268,10 @@ const UploadXray = () => {
                       .from('medical-images')
                       .upload(`${user.id}/${heatFileName}`, blob);
 
+                    if (heatErr) {
+                      console.warn("Heatmap upload failed:", heatErr.message);
+                    }
+
                     if (!heatErr && heatData) {
                       const { data: pubHeat } = supabase.storage
                         .from('medical-images')
@@ -276,10 +290,10 @@ const UploadXray = () => {
                 if (lowerImpression.includes('severe') || lowerImpression.includes('critical')) severity = 'severe';
 
 
-                const { error: insertErr } = await supabase.from('medical_scans').insert([{
+                const { data: insertedScan, error: insertErr } = await supabase.from('medical_scans').insert([{
                   patient_id: selectedPatient.id,
                   user_id: user.id,
-                  scan_type: scanType, // 'auto', 'ct', or 'xray'
+                  scan_type: persistedScanType,
                   original_image_url,
                   heatmap_image_url,
                   findings: parsedReport.findings,
@@ -288,15 +302,28 @@ const UploadXray = () => {
                   labels: parsedReport.labels,
                   kg_data: data.knowledge_graph || null,
                   severity
-                }]);
+                }]).select('id').single();
 
                 if (insertErr) {
                   console.error("Failed to save report to database:", insertErr);
-                  // Don't alert the user necessarily to interrupt the flow, just log it.
+                  toast.error("Analysis completed, but saving the report failed.");
+                  return;
                 }
 
+                if (insertedScan?.id) {
+                  setCurrentScanId(insertedScan.id);
+                }
+
+                await supabase
+                  .from('patients')
+                  .update({ updated_at: now })
+                  .eq('id', selectedPatient.id);
+
+                await refreshPatients();
+                toast.success("Report saved to patient history.");
               } catch (dbError) {
                 console.error("Database Save Error:", dbError);
+                toast.error(dbError instanceof Error ? dbError.message : "Analysis completed, but saving failed.");
               }
             }
           } catch (e) {
@@ -313,7 +340,7 @@ const UploadXray = () => {
       setCurrentStep('idle');
       setProgress(0);
     }
-  }, [setAnalysisResults, tempPreviews, scanType, selectedPatient]);
+  }, [setAnalysisResults, setCurrentScanId, tempPreviews, scanType, selectedPatient, refreshPatients]);
 
   // AUTO-TRIGGER: When coming from Patient Dashboard via Upload Scan button
   useEffect(() => {
@@ -485,18 +512,41 @@ const UploadXray = () => {
 
   return (
     <Layout>
-      <section className="py-12 lg:py-20">
-        <div className="container mx-auto px-4">
-          <div className="text-center mb-12">
-            <h1 className="text-3xl md:text-4xl font-bold text-foreground mb-4">
+      <section className="figma-page-shell">
+        <div className="space-y-10">
+          <div className="figma-workspace-hero grid gap-6 lg:grid-cols-[1fr_390px] lg:items-center">
+            <div>
+              <Badge variant="outline" className="eyebrow mb-4">
+                <Brain className="h-3.5 w-3.5" />
+                Multi-agent diagnostic flow
+              </Badge>
+              <h1 className="mb-3 text-3xl font-extrabold tracking-tight text-foreground md:text-5xl">
               AI Report <span className="text-primary">Synthesis</span>
-            </h1>
+              </h1>
+              <p className="max-w-2xl text-muted-foreground">
+                Upload a scan, watch the agent pipeline progress, and review the generated report with evidence links.
+              </p>
+            </div>
+            <div className="relative">
+              <RadiologyImageCard
+                src={radiologyImages.laptopReview}
+                alt="Radiology report generation workstation"
+                label="Report synthesis"
+                caption="Upload, analyze, verify"
+                className="h-[280px]"
+              />
+              <div className="report-glass-panel absolute left-5 top-5 w-[calc(100%-2.5rem)]">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Current patient</p>
+                <p className="mt-1 font-bold text-foreground">{selectedPatient ? selectedPatient.name : "No patient selected"}</p>
+                <p className="text-xs text-muted-foreground">{selectedPatient ? `${selectedPatient.age} years / ${selectedPatient.gender}` : "Select a patient before upload"}</p>
+              </div>
+            </div>
           </div>
 
-          <div className="grid lg:grid-cols-2 gap-8 max-w-6xl mx-auto">
+          <div className="grid w-full gap-8 lg:grid-cols-2">
             {/* LEFT COLUMN: UPLOAD */}
             <div className="space-y-6">
-              <Card className="overflow-hidden border-2">
+              <Card className="surface-card overflow-hidden">
                 <CardContent className="p-4">
                   <Tabs
                     defaultValue="auto"
@@ -504,10 +554,10 @@ const UploadXray = () => {
                     onValueChange={(val) => setScanType(val as ScanType)}
                     className="w-full max-w-sm mx-auto mb-6"
                   >
-                    <TabsList className="grid w-full grid-cols-3 bg-slate-800 text-slate-400">
-                      <TabsTrigger value="auto" className="data-[state=active]:bg-slate-700 data-[state=active]:text-white">Auto</TabsTrigger>
-                      <TabsTrigger value="xray" className="data-[state=active]:bg-slate-700 data-[state=active]:text-white">X-Ray</TabsTrigger>
-                      <TabsTrigger value="ct" className="data-[state=active]:bg-slate-700 data-[state=active]:text-white">CT Scan</TabsTrigger>
+                    <TabsList className="grid w-full grid-cols-3">
+                      <TabsTrigger value="auto" className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">Auto</TabsTrigger>
+                      <TabsTrigger value="xray" className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">X-Ray</TabsTrigger>
+                      <TabsTrigger value="ct" className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">CT Scan</TabsTrigger>
                     </TabsList>
                   </Tabs>
 
@@ -547,9 +597,9 @@ const UploadXray = () => {
                       {/* Drag & Drop Area */}
                       <div
                         className={cn(
-                          "relative p-12 border-2 border-dashed rounded-lg transition-all",
+                          "relative overflow-hidden rounded-[28px] border-2 border-dashed p-12 transition-all duration-300",
                           !selectedPatient ? "opacity-50 cursor-not-allowed border-border" : "cursor-pointer",
-                          dragActive && selectedPatient ? "border-primary bg-primary/5" : (!selectedPatient ? "" : "border-border hover:border-primary/40")
+                          dragActive && selectedPatient ? "border-primary bg-primary/10 shadow-glow" : (!selectedPatient ? "" : "border-border hover:border-primary/40 hover:bg-white/60")
                         )}
                         onDragEnter={selectedPatient ? handleDrag : undefined}
                         onDragLeave={selectedPatient ? handleDrag : undefined}
@@ -570,17 +620,24 @@ const UploadXray = () => {
                           onChange={(e) => e.target.files?.length && processFiles(e.target.files)}
                         />
                         <div className="text-center">
-                          <Upload className="w-12 h-12 mx-auto mb-4 text-primary" />
-                          <h3 className="text-lg font-semibold">Upload Image</h3>
+                          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10 text-primary shadow-sm">
+                            <Upload className="w-8 h-8" />
+                          </div>
+                          <h3 className="text-lg font-semibold">Upload medical imaging</h3>
                           <p className="text-sm text-muted-foreground mt-1">
                             {!selectedPatient ? "Select a patient first to unlock" : "Drag & drop or click to browse"}
                           </p>
+                          <div className="mt-5 flex justify-center gap-2 text-xs text-muted-foreground">
+                            <span className="medical-chip">X-ray</span>
+                            <span className="medical-chip">CT</span>
+                            <span className="medical-chip">Multi-image</span>
+                          </div>
                         </div>
                       </div>
                     </>
                   ) : (
                     <div>
-                      <div className="relative aspect-square rounded-lg overflow-hidden bg-black mb-4">
+                      <div className="relative mb-4 aspect-square overflow-hidden rounded-[28px] bg-clinical-ink">
                         <img src={displayUrl!} alt="Scan" className="w-full h-full object-contain" />
 
                         {currentStep === 'analyzing' && (
@@ -618,7 +675,7 @@ const UploadXray = () => {
                     </span>
                     <span>{progress}%</span>
                   </div>
-                  <Progress value={progress} className="h-2" />
+                  <Progress value={progress} className="h-2 rounded-full" />
                 </div>
               )}
             </div>
@@ -627,8 +684,8 @@ const UploadXray = () => {
             <div className="space-y-6">
               {extendedReport ? (
                 <>
-                  <Card className="border-primary/20 shadow-xl animate-in fade-in zoom-in-95 duration-500">
-                    <CardHeader className="bg-muted/30 border-b flex flex-row items-center justify-between">
+                <Card className="surface-card border-primary/20 shadow-xl animate-in fade-in zoom-in-95 duration-500">
+                    <CardHeader className="flex flex-row items-center justify-between border-b border-border/50 bg-secondary/40">
                       <CardTitle className="flex items-center gap-2 text-lg">
                         <FileText className="w-5 h-5 text-primary" />
                         Synthesized Report
@@ -658,7 +715,7 @@ const UploadXray = () => {
                         <h4 className="text-xs font-black uppercase text-muted-foreground mb-2 flex items-center gap-2">
                           <Brain className="w-3 h-3" /> Findings
                         </h4>
-                        <div className="text-sm leading-relaxed bg-muted/20 p-4 rounded-md border whitespace-pre-line">
+                        <div className="whitespace-pre-line rounded-[20px] border bg-white/70 p-4 text-sm leading-relaxed">
                           {extendedReport.findings}
                         </div>
                       </section>
@@ -667,7 +724,7 @@ const UploadXray = () => {
                         <h4 className="text-xs font-black uppercase text-muted-foreground mb-2 flex items-center gap-2">
                           <Sparkles className="w-3 h-3" /> Impression
                         </h4>
-                        <div className="p-4 bg-primary/5 border border-primary/10 rounded-md italic text-sm font-medium leading-relaxed">
+                        <div className="rounded-[20px] border border-primary/10 bg-primary/5 p-4 text-sm font-medium italic leading-relaxed">
                           {extendedReport.impression}
                         </div>
                       </section>
@@ -677,7 +734,7 @@ const UploadXray = () => {
                           <h4 className="text-xs font-black uppercase text-muted-foreground mb-2 flex items-center gap-2">
                             <Stethoscope className="w-3 h-3" /> Recommendation
                           </h4>
-                          <div className="p-3 bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-400 rounded-md text-sm font-medium">
+                          <div className="rounded-[20px] border border-amber-500/20 bg-amber-500/10 p-3 text-sm font-medium text-amber-700 dark:text-amber-400">
                             {extendedReport.recommendation}
                           </div>
                         </section>
@@ -725,8 +782,8 @@ const UploadXray = () => {
                 </>
               ) : (
                 <Card className={cn(
-                  "h-full min-h-[500px] flex flex-col transition-all duration-300",
-                  currentStep === 'analyzing' ? "border-primary/50 shadow-lg bg-primary/5" : "border-dashed border-2"
+                  "surface-card flex h-full min-h-[500px] flex-col transition-all duration-300",
+                  currentStep === 'analyzing' ? "border-primary/50 bg-primary/5 shadow-lg" : "border-dashed border-2 bg-white/60"
                 )}>
                   {currentStep === 'analyzing' ? (
                     <CardContent className="flex flex-col justify-center h-full p-8 space-y-8">
@@ -740,7 +797,7 @@ const UploadXray = () => {
                           const isActive = index === activeAgentIndex;
                           const isCompleted = index < activeAgentIndex;
                           return (
-                            <div key={step.id} className={cn("flex items-center gap-4 p-3 rounded-lg transition-all duration-500", isActive ? "bg-background shadow-md scale-105 border border-primary/20" : "opacity-50")}>
+                            <div key={step.id} className={cn("flex items-center gap-4 rounded-[22px] p-3 transition-all duration-500", isActive ? "scale-105 border border-primary/20 bg-white shadow-md" : "opacity-50")}>
                               <div className={cn("w-10 h-10 rounded-full flex items-center justify-center transition-colors", isActive ? "bg-primary text-primary-foreground" : isCompleted ? "bg-green-500 text-white" : "bg-muted text-muted-foreground")}>
                                 {isCompleted ? <CheckCircle2 className="w-5 h-5" /> : isActive ? <Loader2 className="w-5 h-5 animate-spin" /> : <step.icon className="w-5 h-5" />}
                               </div>
@@ -754,8 +811,14 @@ const UploadXray = () => {
                       </div>
                     </CardContent>
                   ) : (
-                    <div className="text-center p-12 text-muted-foreground m-auto">
-                      <FileText className="w-12 h-12 mx-auto mb-4 opacity-20" />
+                    <div className="m-auto w-full p-6 text-center text-muted-foreground">
+                      <RadiologyImageCard
+                        src={radiologyImages.chestXrayReview}
+                        alt="Radiologist preparing report"
+                        label="Awaiting scan"
+                        caption="Report will appear here after analysis"
+                        className="mx-auto mb-6 h-64 max-w-md"
+                      />
                       <p className="text-sm font-medium">Report will appear here after analysis.</p>
                     </div>
                   )}

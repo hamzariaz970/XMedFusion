@@ -14,6 +14,9 @@ from langchain_community.chat_models import ChatOllama
 
 import config
 
+REPORT_CONTEXT_WINDOW = min(config.CONTEXT_WINDOW, 8192)
+LLM_TIMEOUT_SECONDS = 180
+
 # Suppress specific torch load warnings for cleaner output
 warnings.filterwarnings("ignore", category=FutureWarning)
 
@@ -129,7 +132,9 @@ class LocalLLMReportAgent:
             self.llm = ChatOllama(
                 model=model_name, 
                 temperature=config.TEMPERATURE,
-                num_ctx=config.CONTEXT_WINDOW
+                num_ctx=REPORT_CONTEXT_WINDOW,
+                num_predict=320,
+                timeout=LLM_TIMEOUT_SECONDS
             )
 
     def generate_report(self, visual_description):

@@ -7,6 +7,8 @@ import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
+import { RadiologyImageCard } from "@/components/RadiologyImageCard";
+import { radiologyImages } from "@/assets/radiology";
 import {
   ChevronLeft, ChevronRight, Save, Send, ArrowLeft,
   FileText, Eye, AlertCircle, CheckCircle, Info, XCircle
@@ -324,15 +326,18 @@ const HILLabelingPage = () => {
 
   return (
     <Layout>
-      <div className="space-y-6 animate-in fade-in duration-500">
+      <div className="figma-page-shell space-y-6">
         {/* Header */}
-        <div className="flex items-center justify-between">
+        <div className="figma-workspace-hero grid gap-5 lg:grid-cols-[1fr_auto_280px] lg:items-center">
           <div className="flex items-center gap-3">
             <Button variant="ghost" size="icon" onClick={() => navigate("/patients")}>
               <ArrowLeft className="w-5 h-5" />
             </Button>
             <div>
-              <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
+              <Badge variant="outline" className="eyebrow mb-2">
+                Human-in-the-loop review
+              </Badge>
+              <h1 className="flex items-center gap-2 text-2xl font-extrabold text-foreground md:text-4xl">
                 <FileText className="w-6 h-6 text-primary" />
                 {task.title}
               </h1>
@@ -354,17 +359,24 @@ const HILLabelingPage = () => {
               {showInstructions ? "Hide" : "Show"} Instructions
             </Button>
           </div>
+          <RadiologyImageCard
+            src={radiologyImages.chestXrayReview}
+            alt="Radiologist labeling chest X-ray"
+            label="Expert labeling"
+            caption="Human feedback for model quality"
+            className="h-44"
+          />
         </div>
 
         {/* Progress */}
         <div className="space-y-2">
-          <Progress value={progressPct} className="h-2" />
+          <Progress value={progressPct} className="h-2 rounded-full" />
           <p className="text-xs text-muted-foreground text-right">{Math.round(progressPct)}% complete</p>
         </div>
 
         {/* Instructions Panel */}
         {showInstructions && (
-          <Card className="border-primary/30 bg-primary/5">
+          <Card className="surface-card border-primary/30 bg-primary/5">
             <CardContent className="pt-4 pb-4">
               <div className="flex items-start gap-3">
                 <Info className="w-5 h-5 text-primary mt-0.5 shrink-0" />
@@ -374,11 +386,11 @@ const HILLabelingPage = () => {
                     {task.instructions || "Please review each X-ray scan and fill in the report following the IU X-ray dataset format. Provide detailed findings and a concise impression for each scan."}
                   </p>
                   <div className="grid grid-cols-2 gap-4 mt-3 text-xs text-muted-foreground">
-                    <div className="bg-card rounded-lg p-3 border">
+                    <div className="rounded-[20px] border bg-white/75 p-3">
                       <strong className="text-foreground block mb-1">Findings</strong>
                       Describe all observations: lung fields, heart size, mediastinum, bones, and any abnormalities.
                     </div>
-                    <div className="bg-card rounded-lg p-3 border">
+                    <div className="rounded-[20px] border bg-white/75 p-3">
                       <strong className="text-foreground block mb-1">Impression</strong>
                       Summarize your diagnostic interpretation concisely (e.g., "No acute cardiopulmonary disease").
                     </div>
@@ -392,7 +404,7 @@ const HILLabelingPage = () => {
         {/* Main Content */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Left: Scan Image */}
-          <Card className="overflow-hidden">
+          <Card className="surface-card overflow-hidden">
             <CardHeader className="pb-2">
               <div className="flex items-center justify-between">
                 <CardTitle className="text-lg flex items-center gap-2">
@@ -413,7 +425,7 @@ const HILLabelingPage = () => {
             </CardHeader>
             <CardContent>
               {currentScan && (
-                <div className="relative rounded-lg overflow-hidden bg-black/5 border">
+                <div className="relative overflow-hidden rounded-[26px] border bg-black/5">
                   <img
                     src={currentScan.image_url}
                     alt={`Scan ${currentIndex + 1}`}
@@ -467,7 +479,7 @@ const HILLabelingPage = () => {
           </Card>
 
           {/* Right: Report Form */}
-          <Card>
+          <Card className="surface-card">
             <CardHeader className="pb-3">
               <CardTitle className="text-lg flex items-center gap-2">
                 <FileText className="w-5 h-5 text-primary" />
@@ -477,7 +489,7 @@ const HILLabelingPage = () => {
             <CardContent className="space-y-4">
               {/* Rejection Feedback Banner */}
               {isCurrentRejected && !isCurrentSubmitted && currentScan && (
-                <div className="rounded-lg bg-destructive/10 border border-destructive/30 p-3 space-y-1">
+                <div className="space-y-1 rounded-[20px] border border-destructive/30 bg-destructive/10 p-3">
                   <p className="text-sm font-medium text-destructive flex items-center gap-1">
                     <XCircle className="w-4 h-4" /> Report Rejected by Admin
                   </p>
@@ -566,7 +578,7 @@ const HILLabelingPage = () => {
               </div>
 
               {isCurrentSubmitted && (
-                <div className="rounded-lg bg-emerald-500/10 border border-emerald-500/30 p-3 text-center">
+                <div className="rounded-[20px] border border-emerald-500/30 bg-emerald-500/10 p-3 text-center">
                   <p className="text-sm text-emerald-600 flex items-center justify-center gap-1">
                     <CheckCircle className="w-4 h-4" />
                     This report has been submitted and is awaiting admin review.

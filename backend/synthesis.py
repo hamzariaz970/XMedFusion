@@ -10,6 +10,12 @@ from validators import validate_report
 from PIL import Image 
 import config
 
+REPORT_CONTEXT_WINDOW = min(config.CONTEXT_WINDOW, 8192)
+LLM_TIMEOUT_SECONDS = 180
+REPORT_MAX_TOKENS = 420
+CT_GENERATION_TIMEOUT_SECONDS = 120
+CT_REQUEST_TIMEOUT_SECONDS = 240
+
 # <--- NEW IMPORTS --->
 from explain import generate_explainable_image
 from xray_filter import classify_scan
@@ -43,6 +49,7 @@ from draft import (
 # --- 2. Import NEW Vision Agent (Updated API) ---
 from vision import (
     vision_encoder,          # The global model instance
+    classifier as vision_classifier_head,
     get_hybrid_findings,     # The new detection logic
     VisualDescriptionAgent,  # The new writer class
 )
@@ -129,8 +136,10 @@ def _infer_ct_report(image_paths: list) -> str:
     with torch.no_grad():
         out_ids = ct_model.generate(
             **inputs,
-            max_new_tokens=300,
+            max_new_tokens=160,
+            max_time=CT_GENERATION_TIMEOUT_SECONDS,
             do_sample=False,
+            no_repeat_ngram_size=5,
             repetition_penalty=1.1,
             # use_cache=False bypasses Gemma3's HybridCache which requires
             # torch>=2.6 flex_attention mask functions (or_mask_function /
@@ -165,6 +174,89 @@ def format_kg_for_prompt(kg_data):
         
     return "DETECTED FINDINGS:\n" + "\n".join(formatted)
 
+def _extract_report_section(text: str, section: str) -> str:
+    pattern = rf"\b{section}S?:\s*(.*?)(?=\s*(?:FINDINGS|IMPRESSION|LABELS|RECOMMENDATIONS?):|\Z)"
+    match = re.search(pattern, text, flags=re.IGNORECASE | re.MULTILINE | re.DOTALL)
+    return match.group(1).strip() if match else ""
+
+def _kg_labels(kg_data):
+    labels = []
+    seen = set()
+    if not kg_data:
+        return labels
+
+    for text, label in kg_data.get("entities", []):
+        if str(label).lower() != "observation":
+            continue
+        normalized = str(text).strip().lower()
+        if not normalized or normalized in {"clear", "normal"}:
+            continue
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        labels.append(normalized.title())
+    return labels
+
+def _fallback_recommendation(labels):
+    if labels:
+        return "Radiologist review, clinical correlation, and comparison with prior imaging are recommended."
+    return "No acute imaging follow-up is suggested by the generated report; correlate clinically."
+
+def _dedupe_sentences(text: str) -> str:
+    sentences = re.split(r"(?<=[.!?])\s+", text.strip())
+    deduped = []
+    seen = set()
+    for sentence in sentences:
+        normalized = re.sub(r"[^a-z0-9]+", " ", sentence.lower()).strip()
+        if not normalized:
+            continue
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        deduped.append(sentence.strip())
+    return " ".join(deduped)
+
+def normalize_report_sections(report: str, kg_data) -> str:
+    """Return a frontend-stable report with Findings, Impression, Recommendations, and Labels."""
+    clean_report = report.strip()
+    findings = _extract_report_section(clean_report, "FINDING")
+    impression = _extract_report_section(clean_report, "IMPRESSION")
+    recommendation = _extract_report_section(clean_report, "RECOMMENDATION")
+    labels_text = _extract_report_section(clean_report, "LABEL")
+    labels = [item.strip() for item in labels_text.split(",") if item.strip()]
+
+    if not findings and not impression:
+        sentences = [s.strip() + "." for s in clean_report.split(".") if s.strip()]
+        if len(sentences) >= 2:
+            midpoint = max(1, len(sentences) // 2)
+            findings = " ".join(sentences[:midpoint])
+            impression = " ".join(sentences[midpoint:])
+        else:
+            findings = clean_report
+            impression = clean_report
+    elif findings and not impression:
+        impression = findings
+    elif impression and not findings:
+        findings = impression
+
+    findings = _dedupe_sentences(findings)
+    impression = _dedupe_sentences(impression)
+
+    if not labels:
+        labels = _kg_labels(kg_data)
+
+    if not recommendation:
+        recommendation = _fallback_recommendation(labels)
+    recommendation = _dedupe_sentences(recommendation)
+
+    label_line = ", ".join(labels) if labels else "No acute abnormality"
+    return (
+        f"FINDINGS:\n{findings.strip()}\n\n"
+        f"IMPRESSION:\n{impression.strip()}\n\n"
+        f"RECOMMENDATIONS:\n{recommendation.strip()}\n\n"
+        f"LABELS:\n{label_line}"
+    )
+
 # -------------------------------
 # Local Synthesis Agent
 # -------------------------------
@@ -176,7 +268,9 @@ class LocalSynthesisAgent:
         self.llm = ChatOllama(
             model=model_name, 
             temperature=config.TEMPERATURE,
-            num_ctx=config.CONTEXT_WINDOW,
+            num_ctx=REPORT_CONTEXT_WINDOW,
+            num_predict=REPORT_MAX_TOKENS,
+            timeout=LLM_TIMEOUT_SECONDS,
             keep_alive=3600,  # Keep model hot in VRAM for 1 hour
             # CRITICAL SAFETY: Stop markers
             stop=["<|endoftext|>", "RECOMMENDATIONS:", "\n\n\n\n"] 
@@ -209,6 +303,7 @@ class LocalSynthesisAgent:
         text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE).strip()
         text = re.sub(r"\s*```$", "", text).strip()
         text = text.replace("Espaça", "Airspace").replace("Espaco", "Airspace")
+        text = re.sub(r"\bXXXX\b", "visualized structures", text)
         text = re.sub(r"^\s*(?:Revised\s+)?(?:Corrected\s+)?Report:?\s*", "", text, flags=re.IGNORECASE | re.MULTILINE)
         text = re.sub(r"^\s*\*\*.*?\*\*\s*", "", text, flags=re.MULTILINE)
         if text.count("Corrected Report:") > 2:
@@ -220,8 +315,14 @@ class LocalSynthesisAgent:
         target_image = image_paths[0]
         yield json.dumps({"status": "validating", "message": "Checking image modality..."}) + "\n"
         
-        # --- NEW MULTI-CLASS VALIDATION LOGIC ---
-        detected_modality, confidence = classify_scan(target_image)
+        # --- MULTI-CLASS VALIDATION / ROUTING LOGIC ---
+        # In explicit mode, trust the clinician/frontend selection. The bouncer
+        # model is useful for "auto" mode, but it can confuse valid X-rays and CT
+        # slices, so it should not veto an intentional modality choice.
+        if scan_type != "auto":
+            detected_modality, confidence = scan_type, 1.0
+        else:
+            detected_modality, confidence = classify_scan(target_image)
         
         if detected_modality == "invalid":
             error_msg = f"Invalid Image Detected. This does not appear to be a medical scan (Confidence: {confidence:.1%})."
@@ -238,7 +339,12 @@ class LocalSynthesisAgent:
             return
         # ----------------------------------------
         
-        yield json.dumps({"status": "parallel_start", "message": f"Running Agents for {detected_modality.upper()}..."}) + "\n"
+        yield json.dumps({
+            "status": "parallel_start",
+            "message": f"Running Agents for {detected_modality.upper()}...",
+            "detected_modality": detected_modality,
+            "requested_scan_type": scan_type,
+        }) + "\n"
 
         # --- SEQUENTIAL HELPER FUNCTIONS (Updated for New APIs) ---
         
@@ -266,9 +372,15 @@ class LocalSynthesisAgent:
                     # Now generate description based on the merged multi-view findings
                     return vision_agent.generate_description(combined_findings)
 
-                res = await asyncio.to_thread(_process_vision)
+                res = await asyncio.wait_for(
+                    asyncio.to_thread(_process_vision),
+                    timeout=LLM_TIMEOUT_SECONDS,
+                )
                 print("[DEBUG] Vision Agent: Finished multi-view analysis.")
                 return res
+            except asyncio.TimeoutError:
+                print("⚠️ Vision Agent timed out.")
+                return "Visual analysis timed out."
             except Exception as e:
                 print(f"⚠️ Vision Error: {e}")
                 return "Visual analysis failed."
@@ -276,18 +388,31 @@ class LocalSynthesisAgent:
         # 2. Draft Agent
         async def run_draft():
             print("[DEBUG] Draft Agent: Starting...")
-            # Use vision_encoder model for retrieval too (Reuse!)
-            top_reports = await asyncio.to_thread(
-                retrieval_agent.retrieve_top_k, 
-                image_paths, # PASSED LIST OF PATHS INSTEAD OF 1
-                reports_dict
-            )
-            draft_context = "\n\n".join(truncate_report(r, 75) for r in top_reports)
-            print("[DEBUG] Draft Agent: Retrieved reports.")
-            
-            res = await asyncio.to_thread(draft_agent.generate_report, draft_context)
-            print("[DEBUG] Draft Agent: Finished.")
-            return res 
+            try:
+                # Use vision_encoder model for retrieval too (Reuse!)
+                top_reports = await asyncio.to_thread(
+                    retrieval_agent.retrieve_top_k, 
+                    image_paths, # PASSED LIST OF PATHS INSTEAD OF 1
+                    reports_dict
+                )
+                draft_context = "\n\n".join(truncate_report(r, 75) for r in top_reports)
+                print("[DEBUG] Draft Agent: Retrieved reports.")
+
+                if not draft_context.strip():
+                    return "No similar-case context available."
+                
+                res = await asyncio.wait_for(
+                    asyncio.to_thread(draft_agent.generate_report, draft_context),
+                    timeout=LLM_TIMEOUT_SECONDS,
+                )
+                print("[DEBUG] Draft Agent: Finished.")
+                return res
+            except asyncio.TimeoutError:
+                print("⚠️ Draft Agent timed out.")
+                return "Similar-case retrieval timed out; synthesize from visual and KG findings only."
+            except Exception as e:
+                print(f"⚠️ Draft Agent Error: {e}")
+                return "Similar-case retrieval unavailable; synthesize from visual and KG findings only."
 
         # 3. KG Agent
         async def run_kg():
@@ -303,6 +428,7 @@ class LocalSynthesisAgent:
                     clip_model=vision_encoder.model,
                     clip_prep=vision_encoder.preprocess,
                     tokenizer=vision_encoder.tokenizer,
+                    classifier_head=vision_classifier_head,
                     device=vision_encoder.device,
                     debug=False
                 )
@@ -334,7 +460,19 @@ class LocalSynthesisAgent:
             yield json.dumps({"status": "vision_start", "message": "CT Vision Agent building montage & running MedGemma inference..."}) + "\n"
 
             try:
-                vision_report = await asyncio.to_thread(_infer_ct_report, image_paths)
+                vision_report = await asyncio.wait_for(
+                    asyncio.to_thread(_infer_ct_report, image_paths),
+                    timeout=CT_REQUEST_TIMEOUT_SECONDS,
+                )
+            except asyncio.TimeoutError:
+                print(f"[CT Path] ⚠️ CT inference timed out after {CT_REQUEST_TIMEOUT_SECONDS}s")
+                yield json.dumps({
+                    "status": "error",
+                    "message": f"CT inference timed out after {CT_REQUEST_TIMEOUT_SECONDS} seconds. Try fewer slices or verify the MedGemma CT runtime."
+                }) + "\n"
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                return
             except Exception as e:
                 print(f"[CT Path] ❌ CT inference failed: {e}")
                 yield json.dumps({"status": "error", "message": f"CT inference failed: {e}"}) + "\n"
@@ -352,8 +490,11 @@ class LocalSynthesisAgent:
             # X-RAY PIPELINE: BioMedCLIP + 3-agent flow (unchanged)
             # -------------------------------------------------------
             # Run agents sequentially to save VRAM
+            yield json.dumps({"status": "kg_start", "message": "Building clinical knowledge graph..."}) + "\n"
             kg_json, kg_text_block = await run_kg()
+            yield json.dumps({"status": "vision_start", "message": "Extracting visual findings from scan..."}) + "\n"
             vision_report = await run_vision()
+            yield json.dumps({"status": "draft_start", "message": "Retrieving similar cases for report style..."}) + "\n"
             draft_report = await run_draft()
 
             print("[DEBUG] All agents COMPLETE.")
@@ -389,8 +530,17 @@ class LocalSynthesisAgent:
                     content = response.content if hasattr(response, "content") else str(response)
                     return re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL).strip()
 
-                full_response = await asyncio.to_thread(sync_invoke)
+                full_response = await asyncio.wait_for(
+                    asyncio.to_thread(sync_invoke),
+                    timeout=LLM_TIMEOUT_SECONDS,
+                )
                 yield json.dumps({"status": "streaming", "chunk": full_response}) + "\n"
+            except asyncio.TimeoutError:
+                yield json.dumps({
+                    "status": "error",
+                    "message": f"Report synthesis timed out after {LLM_TIMEOUT_SECONDS} seconds. Check Ollama model performance or use a smaller model."
+                }) + "\n"
+                return
             except Exception as e:
                 yield json.dumps({"status": "error", "message": str(e)}) + "\n"
                 return
@@ -444,21 +594,15 @@ class LocalSynthesisAgent:
         v = validate_report(final_report, kg_json)
         if not v["ok"]:
              yield json.dumps({"status": "repair_start", "iter": 99}) + "\n"
-             final_report = await asyncio.to_thread(self.repair_report, final_report, v["errors"], kg_text_block)
+             try:
+                 final_report = await asyncio.wait_for(
+                     asyncio.to_thread(self.repair_report, final_report, v["errors"], kg_text_block),
+                     timeout=LLM_TIMEOUT_SECONDS,
+                 )
+             except asyncio.TimeoutError:
+                 print("⚠️ Report repair timed out; using pre-repair report.")
 
-        # FRONTEND PARSING FIX: Inject the required headers if they don't exist
-        # Since the frontend parser currently expects explicit 'FINDINGS:' and 'IMPRESSION:' headers,
-        # and forcing the LLM to output them ruins its formatting, we manually construct it here.
-        if "FINDINGS:" not in final_report.upper() and "IMPRESSION:" not in final_report.upper():
-            sentences = [s.strip() + "." for s in final_report.split(".") if s.strip()]
-            if len(sentences) >= 2:
-                # Split roughly down the middle for a basic Findings/Impression split
-                midpoint = len(sentences) // 2
-                findings_text = " ".join(sentences[:midpoint])
-                impression_text = " ".join(sentences[midpoint:])
-                final_report = f"FINDINGS:\n{findings_text}\n\nIMPRESSION:\n{impression_text}"
-            else:
-                final_report = f"FINDINGS:\n{final_report}\n\nIMPRESSION:\n{final_report}"
+        final_report = normalize_report_sections(final_report, kg_json)
 
         # ------------------------------------------------------------------
         # NEW: VISUAL EXPLAINABILITY & TRACE
@@ -498,6 +642,8 @@ class LocalSynthesisAgent:
         print(f"\n[FINAL REPORT]:\n{final_report}\n")
         yield json.dumps({
             "status": "complete", 
+            "detected_modality": detected_modality,
+            "requested_scan_type": scan_type,
             "final_report": final_report, 
             "knowledge_graph": kg_json,
             "explainability": explainability_trace,

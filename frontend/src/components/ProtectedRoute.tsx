@@ -35,7 +35,7 @@ export const ProtectedRoute = ({ requireAdmin = false }: ProtectedRouteProps) =>
 
   // Route requires admin but user is not admin
   if (requireAdmin && !isAdmin) {
-    return <Navigate to="/upload" replace />;
+    return <Navigate to="/dashboard" replace />;
   }
 
   // Doctor must be approved to access protected routes

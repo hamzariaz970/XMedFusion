@@ -2,7 +2,10 @@ import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Layout } from "@/components/layout/Layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { RadiologyImageCard } from "@/components/RadiologyImageCard";
+import { radiologyImages } from "@/assets/radiology";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { FileSearch, Info, Activity, Sparkles } from "lucide-react";
@@ -63,22 +66,31 @@ const ExplainabilityModule = () => {
 
   return (
     <Layout>
-      <div className="container mx-auto px-4 py-12 lg:py-20 min-h-[80vh]">
+      <div className="figma-page-shell min-h-[80vh]">
         {/* Header Section */}
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 text-primary text-sm font-medium mb-4">
-            <Sparkles className="w-4 h-4" /> AI Interpretability
+        <div className="figma-workspace-hero mb-8 grid w-full gap-6 text-left lg:grid-cols-[1fr_380px] lg:items-center">
+          <div>
+            <Badge variant="outline" className="eyebrow mb-4">
+              <Sparkles className="w-4 h-4" /> AI Interpretability
+            </Badge>
+            <h1 className="mb-3 text-3xl font-extrabold tracking-tight md:text-5xl">
+              Explainability <span className="text-primary">Module</span>
+            </h1>
+            <p className="max-w-2xl text-muted-foreground">
+              Visualize the evidence behind generated reports with original imaging, model highlights, and an AI narrative.
+            </p>
           </div>
-          <h1 className="text-3xl md:text-4xl font-bold mb-2">
-            Explainability Module
-          </h1>
-          <p className="text-muted-foreground">
-            Visualizing the "Why" behind AI-generated medical reports.
-          </p>
+          <RadiologyImageCard
+            src={previewUrl || radiologyImages.neuroReview}
+            alt="Radiology explainability review"
+            label="Visual evidence"
+            caption={previewUrl ? "Current scan loaded" : "Heatmaps and narrative review"}
+            className="min-h-[240px]"
+          />
         </div>
 
         {!previewUrl ? (
-          <Card className="max-w-md mx-auto border-dashed">
+          <Card className="surface-card mx-auto max-w-2xl border-dashed">
             <CardContent className="flex flex-col items-center p-10">
               <FileSearch className="w-12 h-12 mb-4 text-muted-foreground opacity-50" />
               <p className="mb-6 text-center">
@@ -89,38 +101,38 @@ const ExplainabilityModule = () => {
           </Card>
         ) : (
           <div className="space-y-8">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 max-w-6xl mx-auto">
+            <div className="grid w-full grid-cols-1 gap-8 lg:grid-cols-2">
 
               {/* CARD 1: Original Image */}
-              <Card className="overflow-hidden border-2">
-                <CardHeader className="border-b bg-muted/30">
+              <Card className="surface-card overflow-hidden">
+                <CardHeader className="border-b border-border/50 bg-secondary/40">
                   <CardTitle className="text-sm font-medium flex items-center gap-2">
                     <Activity className="w-4 h-4 text-primary" /> Original Scan
                   </CardTitle>
                 </CardHeader>
-                <CardContent className="p-4 bg-black aspect-square flex items-center justify-center">
+                <CardContent className="flex aspect-square items-center justify-center bg-clinical-ink p-4">
                   <img
                     src={previewUrl}
                     alt="Original X-ray"
-                    className="max-h-full object-contain rounded-sm"
+                    className="max-h-full rounded-[18px] object-contain"
                   />
                 </CardContent>
               </Card>
 
               {/* CARD 2: Insights Heatmap / Bounding Boxes */}
-              <Card className="overflow-hidden border-2">
-                <CardHeader className="border-b bg-muted/30">
+              <Card className="surface-card overflow-hidden">
+                <CardHeader className="border-b border-border/50 bg-secondary/40">
                   <CardTitle className="text-sm font-medium flex items-center gap-2">
                     <Info className="w-4 h-4 text-primary" /> Visual Insights
                   </CardTitle>
                 </CardHeader>
-                <CardContent className="p-4 bg-black aspect-square flex items-center justify-center relative">
+                <CardContent className="relative flex aspect-square items-center justify-center bg-clinical-ink p-4">
                   {/* DIRECTLY USE heatmapData FROM CONTEXT */}
                   {heatmapData ? (
                     <img
                       src={heatmapData}
                       alt="Heatmap"
-                      className="max-h-full object-contain rounded-sm opacity-100 transition-opacity duration-700"
+                      className="max-h-full rounded-[18px] object-contain opacity-100 transition-opacity duration-700"
                     />
                   ) : (
                     <div className="text-white text-center text-sm opacity-70 px-4">
@@ -134,7 +146,7 @@ const ExplainabilityModule = () => {
               </Card>
 
               {/* CARD 3: AI Narrative Result Section */}
-              <Card className="lg:col-span-2 border-primary/20 shadow-lg overflow-hidden">
+              <Card className="surface-card lg:col-span-2 border-primary/20 shadow-lg overflow-hidden">
                 <div className="h-1 bg-gradient-to-r from-primary via-blue-400 to-primary animate-pulse" />
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
@@ -163,7 +175,7 @@ const ExplainabilityModule = () => {
                             const rawHeading = lines[0].replace(/^\*{1,2}|\*{1,2}$/g, '').trim();
                             const body = lines.slice(1).join('\n').replace(/\*{1,2}/g, '').trim();
                             return (
-                              <div key={idx} className="rounded-lg border border-primary/10 bg-muted/20 p-4">
+                              <div key={idx} className="rounded-[22px] border border-primary/10 bg-primary/5 p-4">
                                 <h4 className="text-sm font-bold text-primary mb-2 flex items-center gap-2">
                                   <Activity className="w-4 h-4 shrink-0" />
                                   {rawHeading}

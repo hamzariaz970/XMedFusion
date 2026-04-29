@@ -3,6 +3,8 @@ import { Layout } from "@/components/layout/Layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { RadiologyImageCard } from "@/components/RadiologyImageCard";
+import { radiologyImages } from "@/assets/radiology";
 import { 
   FileImage, 
   Eye, 
@@ -13,6 +15,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Link } from "react-router-dom";
+import { useAnalysis } from "@/context/AnalysisContext";
 
 // Hardcoded image regions and sentence mappings
 const imageMappings = [
@@ -62,25 +65,39 @@ const ImageMapping = () => {
   const [selectedMapping, setSelectedMapping] = useState<number | null>(null);
   const [showOverlays, setShowOverlays] = useState(true);
   const [hoveredMapping, setHoveredMapping] = useState<number | null>(null);
+  const { previewUrl } = useAnalysis();
 
   return (
     <Layout>
-      <section className="py-12 lg:py-20">
-        <div className="container mx-auto px-4">
-          <div className="text-center mb-12">
-            <h1 className="text-3xl md:text-4xl font-bold text-foreground mb-4">
-              Image-Report <span className="text-primary">Mapping</span>
-            </h1>
-            <p className="text-muted-foreground max-w-2xl mx-auto">
-              Visualize how report findings are mapped to specific regions of the X-ray image for evidence-based transparency.
-            </p>
+      <section className="figma-page-shell">
+        <div className="space-y-10">
+          <div className="figma-workspace-hero grid w-full gap-6 lg:grid-cols-[1fr_380px] lg:items-center">
+            <div>
+              <Badge variant="outline" className="eyebrow mb-4">
+                <Layers className="h-3.5 w-3.5" />
+                Evidence localization
+              </Badge>
+              <h1 className="mb-4 text-3xl font-extrabold tracking-tight text-foreground md:text-5xl">
+                Image-Report <span className="text-primary">Mapping</span>
+              </h1>
+              <p className="max-w-2xl text-muted-foreground">
+                Visualize how report findings are mapped to specific regions of the X-ray image for evidence-based transparency.
+              </p>
+            </div>
+            <RadiologyImageCard
+              src={previewUrl || radiologyImages.chestXrayReview}
+              alt="Radiologist reviewing report mapping"
+              label="Region mapping"
+              caption="Report sentences connected to scan areas"
+              className="min-h-[240px]"
+            />
           </div>
 
-          <div className="grid lg:grid-cols-3 gap-8 max-w-7xl mx-auto">
+          <div className="grid w-full gap-8 lg:grid-cols-3">
             {/* Image Display */}
             <div className="lg:col-span-2 space-y-4">
-              <Card className="overflow-hidden">
-                <CardHeader className="border-b border-border">
+              <Card className="surface-card overflow-hidden">
+                <CardHeader className="border-b border-border/50 bg-secondary/40">
                   <div className="flex items-center justify-between">
                     <CardTitle className="flex items-center gap-2">
                       <FileImage className="w-5 h-5 text-primary" />
@@ -106,8 +123,10 @@ const ImageMapping = () => {
                   </div>
                 </CardHeader>
                 <CardContent className="p-0">
-                  <div className="relative aspect-square bg-foreground/95">
-                    {/* Placeholder X-ray image */}
+                  <div className="relative aspect-square bg-clinical-ink">
+                    {previewUrl ? (
+                      <img src={previewUrl} alt="Selected scan" className="absolute inset-0 h-full w-full object-contain p-4" />
+                    ) : (
                     <div className="absolute inset-0 flex items-center justify-center">
                       <svg viewBox="0 0 400 400" className="w-full h-full opacity-30">
                         {/* Simplified X-ray representation */}
@@ -120,13 +139,14 @@ const ImageMapping = () => {
                         <path d="M100 320 Q200 350 300 320" fill="none" stroke="white" strokeWidth="1.5" />
                       </svg>
                     </div>
+                    )}
 
                     {/* Region Overlays */}
                     {showOverlays && imageMappings.map((mapping) => (
                       <div
                         key={mapping.id}
                         className={cn(
-                          "absolute border-2 rounded-lg cursor-pointer transition-all duration-300",
+                          "absolute cursor-pointer rounded-[18px] border-2 transition-all duration-300",
                           mapping.color,
                           (selectedMapping === mapping.id || hoveredMapping === mapping.id)
                             ? "opacity-100 scale-105"
@@ -173,7 +193,7 @@ const ImageMapping = () => {
 
             {/* Findings List */}
             <div className="space-y-4">
-              <Card>
+              <Card className="surface-card">
                 <CardHeader>
                   <CardTitle className="text-lg">Report Findings</CardTitle>
                   <p className="text-sm text-muted-foreground">
@@ -185,7 +205,7 @@ const ImageMapping = () => {
                     <div
                       key={mapping.id}
                       className={cn(
-                        "p-4 rounded-lg border-2 cursor-pointer transition-all duration-200",
+                        "cursor-pointer rounded-[22px] border-2 p-4 transition-all duration-300",
                         selectedMapping === mapping.id
                           ? "border-primary bg-primary/5 shadow-md"
                           : "border-border hover:border-primary/50 hover:bg-muted/50"
@@ -212,7 +232,7 @@ const ImageMapping = () => {
                         {mapping.sentence}
                       </p>
                       {selectedMapping === mapping.id && (
-                        <div className="mt-3 pt-3 border-t border-border flex items-center gap-2 text-xs text-primary">
+                        <div className="mt-3 flex items-center gap-2 border-t border-border pt-3 text-xs text-primary">
                           <Info className="w-3 h-3" />
                           Region highlighted on image
                         </div>
@@ -223,7 +243,7 @@ const ImageMapping = () => {
               </Card>
 
               {/* Legend */}
-              <Card>
+              <Card className="surface-card">
                 <CardHeader className="pb-3">
                   <CardTitle className="text-sm">Color Legend</CardTitle>
                 </CardHeader>
@@ -238,7 +258,7 @@ const ImageMapping = () => {
               </Card>
 
               {/* Navigation */}
-              <Card>
+              <Card className="surface-card">
                 <CardContent className="p-4">
                   <Link to="/knowledge-graph">
                     <Button variant="outline" className="w-full justify-between">

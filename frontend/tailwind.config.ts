@@ -58,6 +58,14 @@ export default {
           success: "hsl(var(--medical-success))",
           warning: "hsl(var(--medical-warning))",
         },
+        success: "hsl(var(--success))",
+        warning: "hsl(var(--warning))",
+        clinical: {
+          ink: "hsl(var(--clinical-ink))",
+          steel: "hsl(var(--clinical-steel))",
+          copper: "hsl(var(--clinical-copper))",
+          veil: "hsl(var(--clinical-veil))",
+        },
         sidebar: {
           DEFAULT: "hsl(var(--sidebar-background))",
           foreground: "hsl(var(--sidebar-foreground))",
@@ -78,6 +86,7 @@ export default {
         'glow': 'var(--shadow-glow)',
         'card': 'var(--shadow-md)',
         'card-hover': 'var(--shadow-lg)',
+        'clinical': '0 24px 70px hsl(var(--primary) / 0.16)',
       },
       keyframes: {
         "accordion-down": {

@@ -6,10 +6,12 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Progress } from "@/components/ui/progress";
+import { RadiologyImageCard } from "@/components/RadiologyImageCard";
+import { radiologyImages } from "@/assets/radiology";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Users, Search, Activity, Plus, UserCog, Stethoscope, FileText, Server, Cpu, HardDrive, Clock, Trash2, Pencil, ShieldCheck, ShieldOff, Wifi, WifiOff, Zap, CheckCircle, XCircle, Crown, Brain, Upload, Eye, MessageSquare, Play } from "lucide-react";
+import { Users, Search, Activity, Plus, UserCog, Stethoscope, FileText, Server, Cpu, HardDrive, Clock, Trash2, Pencil, ShieldCheck, ShieldOff, Wifi, WifiOff, Zap, CheckCircle, XCircle, Crown, Brain, Upload, Eye, MessageSquare, Play, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/lib/supabaseClient";
 import { toast } from "sonner";
@@ -289,13 +291,17 @@ const AdminDashboard = () => {
 
   return (
     <Layout>
-      <div className="container mx-auto px-4 py-8">
+      <div className="figma-page-shell space-y-8">
         {/* Header */}
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-8">
+        <div className="figma-workspace-hero grid gap-5 lg:grid-cols-[1fr_auto_280px] lg:items-center">
           <div>
-            <h1 className="text-3xl font-bold text-foreground mb-2 flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-primary/20 flex items-center justify-center"><ShieldCheck className="w-5 h-5 text-primary" /></div>
-              Admin Dashboard
+            <Badge variant="outline" className="eyebrow mb-3">
+              <Sparkles className="h-3.5 w-3.5" />
+              Platform command center
+            </Badge>
+            <h1 className="mb-2 flex items-center gap-3 text-3xl font-extrabold tracking-tight text-foreground md:text-5xl">
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/15 text-primary shadow-sm"><ShieldCheck className="h-6 w-6" /></div>
+              Admin <span className="text-primary">Dashboard</span>
             </h1>
             <p className="text-muted-foreground">Platform oversight — manage doctors, approve requests &amp; monitor health</p>
           </div>
@@ -303,10 +309,18 @@ const AdminDashboard = () => {
             <Button className="gap-2 shadow-glow" onClick={openAdd}><Plus className="w-4 h-4" />Add Doctor</Button>
             <Button variant="outline" className="gap-2" onClick={() => setAdminModalOpen(true)}><Crown className="w-4 h-4" />Add Admin</Button>
           </div>
+          <RadiologyImageCard
+            src={radiologyImages.teamReview}
+            alt="Radiology operations review"
+            label="Admin oversight"
+            caption="Doctors, tasks, and model health"
+            className="h-44"
+            scanLine={false}
+          />
         </div>
 
         {/* Stat Cards */}
-        <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
           <StatCard icon={Stethoscope} label="Registered Doctors" value={doctors.length} />
           <StatCard icon={Users} label="Active Doctors" value={activeDoctors} />
           <StatCard icon={Clock} label="Pending Requests" value={pendingRequests.length} />
@@ -315,7 +329,7 @@ const AdminDashboard = () => {
         </div>
 
         {/* Tabs */}
-        <div className="flex gap-2 mb-6 border-b border-border/50 pb-2">
+        <div className="figma-tool-panel flex gap-2 overflow-x-auto p-2">
           {tabs.map(t => (
             <Button key={t.id} variant={activeTab === t.id ? "default" : "ghost"} size="sm" className={cn("gap-2", activeTab === t.id && "shadow-glow")} onClick={() => setActiveTab(t.id)}>
               <t.icon className="w-4 h-4" />{t.label}
@@ -327,12 +341,12 @@ const AdminDashboard = () => {
           <div className="lg:col-span-2">
             {/* Doctors Tab */}
             {activeTab === "doctors" && (
-              <Card className="border-border/50 bg-card/50 backdrop-blur">
+              <Card className="surface-card">
                 <CardHeader>
                   <div className="flex flex-col md:flex-row md:items-center gap-4">
                     <CardTitle className="flex items-center gap-2"><Stethoscope className="w-5 h-5 text-primary" />Doctor Registry</CardTitle>
                     <div className="flex-1 flex flex-col md:flex-row gap-2">
-                      <div className="relative flex-1"><Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" /><Input placeholder="Search doctors..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="pl-9 bg-background/50" /></div>
+                      <div className="relative flex-1"><Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" /><Input placeholder="Search doctors..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="bg-white/70 pl-9" /></div>
                       <div className="flex gap-2">{["all","active","suspended"].map(s => (<Button key={s} variant={statusFilter===s?"default":"outline"} size="sm" onClick={() => setStatusFilter(s)} className="capitalize">{s==="all"?"All":s}</Button>))}</div>
                     </div>
                   </div>
@@ -362,7 +376,7 @@ const AdminDashboard = () => {
 
             {/* Pending Tab */}
             {activeTab === "pending" && (
-              <Card className="border-border/50 bg-card/50 backdrop-blur">
+              <Card className="surface-card">
                 <CardHeader><CardTitle className="flex items-center gap-2"><Clock className="w-5 h-5 text-amber-500" />Pending Registration Requests</CardTitle></CardHeader>
                 <CardContent>
                   {pendingRequests.length === 0 ? (
@@ -370,7 +384,7 @@ const AdminDashboard = () => {
                   ) : (
                     <div className="space-y-3">
                       {pendingRequests.map(req => (
-                        <div key={req.role.id} className="flex items-center justify-between p-4 rounded-lg border border-amber-500/20 bg-amber-500/5">
+                        <div key={req.role.id} className="flex items-center justify-between rounded-[22px] border border-amber-500/20 bg-amber-500/5 p-4 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-card">
                           <div className="flex items-center gap-3">
                             <div className="w-10 h-10 rounded-full bg-amber-500/20 flex items-center justify-center"><span className="text-sm font-medium text-amber-600">{req.doctor.full_name.split(" ").map(n => n[0]).join("")}</span></div>
                             <div><p className="font-medium text-foreground">{req.doctor.full_name}</p><p className="text-xs text-muted-foreground">{req.doctor.email}</p><Badge variant="secondary" className="mt-1 text-xs">{req.doctor.specialization}</Badge></div>
@@ -389,7 +403,7 @@ const AdminDashboard = () => {
 
             {/* Admins Tab */}
             {activeTab === "admins" && (
-              <Card className="border-border/50 bg-card/50 backdrop-blur">
+              <Card className="surface-card">
                 <CardHeader><CardTitle className="flex items-center gap-2"><Crown className="w-5 h-5 text-amber-500" />Platform Administrators</CardTitle></CardHeader>
                 <CardContent>
                   {adminRoles.length === 0 ? (
@@ -399,7 +413,7 @@ const AdminDashboard = () => {
                       {adminRoles.map(ar => {
                         const doc = doctors.find(d => d.user_id === ar.user_id);
                         return (
-                          <div key={ar.id} className="flex items-center justify-between p-3 rounded-lg border border-border/50 bg-background/50">
+                          <div key={ar.id} className="flex items-center justify-between rounded-[22px] border border-border/50 bg-white/70 p-3 transition-all duration-300 hover:border-primary/25 hover:shadow-sm">
                             <div className="flex items-center gap-3">
                               <div className="w-10 h-10 rounded-full bg-amber-500/20 flex items-center justify-center"><Crown className="w-4 h-4 text-amber-500" /></div>
                               <div><p className="font-medium text-foreground">{doc?.full_name || "Admin User"}</p><p className="text-xs text-muted-foreground">{doc?.email || ar.user_id}</p></div>
@@ -417,7 +431,7 @@ const AdminDashboard = () => {
 
             {/* HIL Feedback Tab */}
             {activeTab === "hil" && (
-              <Card className="border-border/50 bg-card/50 backdrop-blur">
+              <Card className="surface-card">
                 <CardHeader>
                   <div className="flex items-center justify-between">
                     <CardTitle className="flex items-center gap-2"><Brain className="w-5 h-5 text-primary" />Human-in-the-Loop Tasks</CardTitle>
@@ -436,7 +450,7 @@ const AdminDashboard = () => {
                         const doc = doctors.find(d => d.user_id === t.doctor_id);
                         const pct = t.total_scans > 0 ? Math.round((t.completed_scans / t.total_scans) * 100) : 0;
                         return (
-                          <div key={t.id} className="rounded-xl border border-border/50 p-4 space-y-3 hover:bg-muted/30 transition-colors">
+                          <div key={t.id} className="space-y-3 rounded-[24px] border border-border/50 bg-white/70 p-4 transition-all duration-300 hover:-translate-y-0.5 hover:border-primary/25 hover:shadow-card">
                             <div className="flex items-center justify-between">
                               <div>
                                 <h4 className="font-semibold text-foreground">{t.title}</h4>
@@ -482,7 +496,7 @@ const AdminDashboard = () => {
 
           {/* Sidebar */}
           <div className="space-y-6">
-            <Card className="border-border/50 bg-card/50 backdrop-blur">
+            <Card className="surface-card">
               <CardHeader><CardTitle className="flex items-center gap-2"><Server className="w-5 h-5 text-primary" />Server Health</CardTitle></CardHeader>
               <CardContent className="space-y-5">
                 {healthError ? (
@@ -503,12 +517,12 @@ const AdminDashboard = () => {
               </CardContent>
             </Card>
 
-            <Card className="border-border/50 bg-card/50 backdrop-blur">
+            <Card className="surface-card">
               <CardHeader><CardTitle className="flex items-center gap-2"><Activity className="w-5 h-5 text-primary" />Platform Summary</CardTitle></CardHeader>
               <CardContent className="space-y-4">
                 <div className="grid grid-cols-2 gap-4">
                   {[{v:doctors.length,l:"Doctors"},{v:patientCount,l:"Patients"},{v:reportCount,l:"Reports"},{v:activeDoctors,l:"Active"}].map(s => (
-                    <div key={s.l} className="bg-background/50 rounded-lg p-4 border border-border/50 text-center"><p className="text-2xl font-bold text-primary">{s.v}</p><p className="text-xs text-muted-foreground">{s.l}</p></div>
+                    <div key={s.l} className="rounded-[22px] border border-border/50 bg-white/70 p-4 text-center"><p className="text-2xl font-bold text-primary">{s.v}</p><p className="text-xs text-muted-foreground">{s.l}</p></div>
                   ))}
                 </div>
               </CardContent>
@@ -571,7 +585,7 @@ const AdminDashboard = () => {
           <DialogHeader><DialogTitle>Review Submitted Reports</DialogTitle></DialogHeader>
           <div className="space-y-6">
             {hilReviewScans.map((s, i) => (
-              <div key={s.id} className="rounded-xl border p-4 space-y-3">
+              <div key={s.id} className="space-y-3 rounded-[24px] border border-border/60 bg-white/75 p-4">
                 <div className="flex items-center justify-between">
                   <h4 className="font-medium">Scan {i + 1}</h4>
                   <Badge variant="outline" className={cn(
@@ -581,7 +595,7 @@ const AdminDashboard = () => {
                   )}>{s.report ? s.status : "Not labeled"}</Badge>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <img src={s.image_url} alt={`Scan ${i+1}`} className="rounded-lg border max-h-[300px] object-contain w-full bg-black/5" />
+                  <img src={s.image_url} alt={`Scan ${i+1}`} className="max-h-[300px] w-full rounded-[22px] border bg-black/5 object-contain" />
                   {s.report ? (
                     <div className="space-y-2 text-sm">
                       {s.report.indication && <div><strong className="text-muted-foreground">Indication:</strong> <span>{s.report.indication}</span></div>}
@@ -619,7 +633,7 @@ const AdminDashboard = () => {
 };
 
 function StatCard({ icon: Icon, label, value }: { icon: any; label: string; value: number }) {
-  return (<Card className="border-border/50 bg-card/50 backdrop-blur"><CardContent className="pt-6"><div className="flex items-center gap-4"><div className="w-12 h-12 rounded-xl bg-primary/20 flex items-center justify-center"><Icon className="w-6 h-6 text-primary" /></div><div><p className="text-2xl font-bold text-foreground">{value}</p><p className="text-sm text-muted-foreground">{label}</p></div></div></CardContent></Card>);
+  return (<Card className="metric-card"><CardContent className="pt-6"><div className="flex items-center gap-4"><div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/15 text-primary"><Icon className="h-6 w-6" /></div><div><p className="text-2xl font-bold text-foreground">{value}</p><p className="text-sm text-muted-foreground">{label}</p></div></div></CardContent></Card>);
 }
 
 function MetricBar({ icon: Icon, label, value, max, unit, hideIcon }: { icon: any; label: string; value: number; max: number; unit: string; hideIcon?: boolean }) {

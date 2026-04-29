@@ -8,6 +8,8 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { RadiologyImageCard } from "@/components/RadiologyImageCard";
+import { radiologyImages } from "@/assets/radiology";
 import {
   Table,
   TableBody,
@@ -40,7 +42,9 @@ import {
   Upload,
   Image as ImageIcon,
   X,
-  Brain
+  Brain,
+  Sparkles,
+  ShieldCheck
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/lib/supabaseClient";
@@ -250,12 +254,18 @@ const PatientDashboard = () => {
 
   return (
     <Layout>
-      <div className="container mx-auto px-4 py-8">
+      <div className="figma-page-shell space-y-8">
         {/* Header */}
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-8">
+        <div className="figma-workspace-hero grid gap-5 lg:grid-cols-[1fr_auto_280px] lg:items-center">
           <div>
-            <h1 className="text-3xl font-bold text-foreground mb-2">Patient Dashboard</h1>
-            <p className="text-muted-foreground">
+            <Badge variant="outline" className="eyebrow mb-3">
+              <ShieldCheck className="h-3.5 w-3.5" />
+              Clinical case registry
+            </Badge>
+            <h1 className="text-3xl font-extrabold tracking-tight text-foreground md:text-5xl">
+              Patient <span className="text-primary">Dashboard</span>
+            </h1>
+            <p className="mt-2 text-muted-foreground">
               Track and manage patient cases and diagnostic history
             </p>
           </div>
@@ -307,14 +317,22 @@ const PatientDashboard = () => {
               </form>
             </DialogContent>
           </Dialog>
+          <RadiologyImageCard
+            src={radiologyImages.patientExplanation}
+            alt="Doctor reviewing patient imaging record"
+            label="Patient context"
+            caption="History, imaging, reports"
+            className="h-44"
+            scanLine={false}
+          />
         </div>
 
         {/* Stats Cards */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-          <Card className="border-border/50 bg-card/50 backdrop-blur">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <Card className="metric-card">
             <CardContent className="pt-6">
               <div className="flex items-center gap-4">
-                <div className="w-12 h-12 rounded-xl bg-primary/20 flex items-center justify-center">
+                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/15">
                   <User className="w-6 h-6 text-primary" />
                 </div>
                 <div>
@@ -324,10 +342,10 @@ const PatientDashboard = () => {
               </div>
             </CardContent>
           </Card>
-          <Card className="border-border/50 bg-card/50 backdrop-blur">
+          <Card className="metric-card">
             <CardContent className="pt-6">
               <div className="flex items-center gap-4">
-                <div className="w-12 h-12 rounded-xl bg-primary/20 flex items-center justify-center">
+                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/15">
                   <Activity className="w-6 h-6 text-primary" />
                 </div>
                 <div>
@@ -337,10 +355,10 @@ const PatientDashboard = () => {
               </div>
             </CardContent>
           </Card>
-          <Card className="border-border/50 bg-card/50 backdrop-blur">
+          <Card className="metric-card">
             <CardContent className="pt-6">
               <div className="flex items-center gap-4">
-                <div className="w-12 h-12 rounded-xl bg-destructive/20 flex items-center justify-center">
+                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-destructive/15">
                   <AlertTriangle className="w-6 h-6 text-destructive" />
                 </div>
                 <div>
@@ -350,10 +368,10 @@ const PatientDashboard = () => {
               </div>
             </CardContent>
           </Card>
-          <Card className="border-border/50 bg-card/50 backdrop-blur">
+          <Card className="metric-card">
             <CardContent className="pt-6">
               <div className="flex items-center gap-4">
-                <div className="w-12 h-12 rounded-xl bg-success/20 flex items-center justify-center">
+                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-success/15">
                   <CheckCircle className="w-6 h-6 text-success" />
                 </div>
                 <div>
@@ -367,7 +385,7 @@ const PatientDashboard = () => {
 
         {/* HIL Tasks Notification */}
         {hilTasks.length > 0 && (
-          <Card className="mb-8 border-primary/30 bg-primary/5">
+          <Card className="surface-card border-primary/30 bg-primary/5">
             <CardContent className="pt-6 pb-4">
               <div className="flex items-center gap-3 mb-4">
                 <div className="w-10 h-10 rounded-xl bg-primary/20 flex items-center justify-center">
@@ -380,7 +398,7 @@ const PatientDashboard = () => {
               </div>
               <div className="space-y-3">
                 {hilTasks.map(t => (
-                  <div key={t.id} className="flex items-center justify-between bg-card rounded-lg border p-3">
+                  <div key={t.id} className="flex items-center justify-between rounded-[22px] border border-primary/10 bg-white/75 p-3 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-sm">
                     <div>
                       <p className="font-medium text-foreground">{t.title}</p>
                       <p className="text-xs text-muted-foreground">{t.completed_scans}/{t.total_scans} scans labeled</p>
@@ -398,13 +416,17 @@ const PatientDashboard = () => {
         <div className="w-full">
           {/* Patient List */}
           <div>
-            <Card className="border-border/50 bg-card/50 backdrop-blur h-[800px] flex flex-col">
+            <Card className="surface-card min-h-[720px] flex flex-col">
               <CardHeader>
                 <div className="flex flex-col md:flex-row md:items-center gap-4">
                   <CardTitle className="flex items-center gap-2 whitespace-nowrap">
                     <User className="w-5 h-5 text-primary" />
                     Patient Registry
                   </CardTitle>
+                  <div className="medical-chip md:ml-auto">
+                    <Sparkles className="h-3.5 w-3.5" />
+                    {selectedPatient ? selectedPatient.name : "Select a patient"}
+                  </div>
                   <div className="flex-1 flex flex-col md:flex-row gap-2">
                     <div className="relative flex-1">
                       <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
@@ -412,7 +434,7 @@ const PatientDashboard = () => {
                         placeholder="Search patients..."
                         value={searchTerm}
                         onChange={(e) => setSearchTerm(e.target.value)}
-                        className="pl-9 bg-background/50"
+                        className="bg-white/70 pl-9"
                       />
                     </div>
                     <div className="flex flex-wrap gap-2">
@@ -550,10 +572,10 @@ const PatientDashboard = () => {
                         value={dialogScanType}
                         onValueChange={setDialogScanType}
                       >
-                        <TabsList className="bg-slate-800 text-slate-400 h-8">
-                          <TabsTrigger value="auto" className="text-xs px-3 h-7 data-[state=active]:bg-slate-700 data-[state=active]:text-white">Auto</TabsTrigger>
-                          <TabsTrigger value="xray" className="text-xs px-3 h-7 data-[state=active]:bg-slate-700 data-[state=active]:text-white">X‑Ray</TabsTrigger>
-                          <TabsTrigger value="ct" className="text-xs px-3 h-7 data-[state=active]:bg-slate-700 data-[state=active]:text-white">CT Scan</TabsTrigger>
+                    <TabsList className="h-8">
+                          <TabsTrigger value="auto" className="text-xs px-3 h-7 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">Auto</TabsTrigger>
+                          <TabsTrigger value="xray" className="text-xs px-3 h-7 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">X-Ray</TabsTrigger>
+                          <TabsTrigger value="ct" className="text-xs px-3 h-7 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">CT Scan</TabsTrigger>
                         </TabsList>
                       </Tabs>
                       <input
@@ -573,7 +595,7 @@ const PatientDashboard = () => {
                   <ScrollArea className="flex-1 pr-4 mt-4">
                     <div className="space-y-6">
                       {/* Patient Info Card */}
-                      <Card className="border-border/50 bg-card/50 backdrop-blur">
+                      <Card className="surface-card">
                         <CardHeader>
                           <CardTitle className="flex items-center gap-2">
                             <FileText className="w-5 h-5 text-primary" />
@@ -658,7 +680,7 @@ const PatientDashboard = () => {
                       </Card>
 
                       {/* Diagnostic History */}
-                      <Card className="border-border/50 bg-card/50 backdrop-blur">
+                      <Card className="surface-card">
                         <CardHeader>
                           <CardTitle className="flex items-center gap-2">
                             <Activity className="w-5 h-5 text-primary" />
@@ -681,7 +703,7 @@ const PatientDashboard = () => {
                                   )}
                                 >
                                   <div className="absolute left-0 top-0 w-3 h-3 rounded-full bg-primary -translate-x-[5px]" />
-                                  <div className="bg-background/50 rounded-lg p-4 border border-border/50 hover:border-primary/30 transition-colors">
+                                  <div className="rounded-[22px] border border-border/50 bg-white/70 p-4 transition-all duration-300 hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-sm">
                                     <div className="flex items-center justify-between mb-3">
                                       <span className="text-sm font-semibold text-foreground uppercase tracking-wider">
                                         {scan.scan_type === 'auto' ? 'Medical Scan' : scan.scan_type}
@@ -739,7 +761,7 @@ const PatientDashboard = () => {
 
                                     <div className="flex flex-col sm:flex-row gap-2 items-start sm:items-center justify-between mt-4 pb-2 border-b border-border/30">
                                       <div className="flex flex-wrap items-center gap-3">
-                                        {scan.original_image_url.split(',').map((url, imgIndex) => {
+                                        {(scan.original_image_url || "").split(',').map((url, imgIndex) => {
                                           const urlValue = url.trim();
                                           if (!urlValue) return null;
                                           return (
@@ -748,9 +770,9 @@ const PatientDashboard = () => {
                                               href={urlValue}
                                               target="_blank"
                                               rel="noreferrer"
-                                              className="flex items-center gap-1 text-xs font-medium text-primary hover:text-primary/80 hover:underline bg-primary/10 px-2 py-1 rounded"
+                                              className="flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary hover:text-primary/80 hover:underline"
                                             >
-                                              <ImageIcon className="w-3.5 h-3.5" /> View Scan {scan.original_image_url.includes(',') ? `#${imgIndex + 1}` : ''}
+                                              <ImageIcon className="w-3.5 h-3.5" /> View Scan {(scan.original_image_url || "").includes(',') ? `#${imgIndex + 1}` : ''}
                                             </a>
                                           );
                                         })}
@@ -759,7 +781,7 @@ const PatientDashboard = () => {
                                             href={scan.heatmap_image_url}
                                             target="_blank"
                                             rel="noreferrer"
-                                            className="flex items-center gap-1 text-xs font-medium text-orange-500 hover:text-orange-400 hover:underline bg-orange-500/10 px-2 py-1 rounded"
+                                            className="flex items-center gap-1 rounded-full bg-orange-500/10 px-2.5 py-1 text-xs font-medium text-orange-500 hover:text-orange-400 hover:underline"
                                           >
                                             <Activity className="w-3.5 h-3.5" /> Insights
                                           </a>

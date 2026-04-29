@@ -1,0 +1,726 @@
+Browserslist: browsers data (caniuse-lite) is 10 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+[2m5:50:02 pm[22m [31m[1m[vite][22m[39m [31mInternal server error: [postcss] D:/FYP/XMedFusion/frontend/src/index.css:230:5: The `bg-white/88` class does not exist. If `bg-white/88` is a custom class, make sure it is defined within a `@layer` directive.[39m
+  Plugin: [35mvite:css[39m
+  File: [36mD:/FYP/XMedFusion/frontend/src/index.css[39m:230:4
+[33m  228|  
+  229|    .figma-workspace-hero {
+  230|      @apply relative overflow-hidden border border-white/80 bg-white/88 p-6 shadow-card md:p-8;
+     |      ^
+  231|      border-radius: 34px;
+  232|    }[39m
+      at Input.error (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\input.js:135:16)
+      at AtRule.error (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\node.js:146:32)
+      at processApply (D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:380:29)
+      at D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:551:9
+      at D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\processTailwindFeatures.js:55:50
+      at async plugins (D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\plugin.js:38:17)
+      at async LazyResult.runAsync (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\lazy-result.js:293:11)
+      at async compileCSS (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:36898:21)
+      at async TransformPluginContext.transform (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:36171:11)
+      at async PluginContainer.transform (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:49099:18)
+[2m5:50:02 pm[22m [31m[1m[vite][22m[39m [31mInternal server error: [postcss] D:/FYP/XMedFusion/frontend/src/index.css:230:5: The `bg-white/88` class does not exist. If `bg-white/88` is a custom class, make sure it is defined within a `@layer` directive.[39m
+  Plugin: [35mvite:css[39m
+  File: [36mD:/FYP/XMedFusion/frontend/src/index.css[39m:230:4
+[33m  228|  
+  229|    .figma-workspace-hero {
+  230|      @apply relative overflow-hidden border border-white/80 bg-white/88 p-6 shadow-card md:p-8;
+     |      ^
+  231|      border-radius: 34px;
+  232|    }[39m
+      at Input.error (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\input.js:135:16)
+      at AtRule.error (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\node.js:146:32)
+      at processApply (D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:380:29)
+      at D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:551:9
+      at D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\processTailwindFeatures.js:55:50
+      at async plugins (D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\plugin.js:38:17)
+      at async LazyResult.runAsync (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\lazy-result.js:293:11)
+      at async compileCSS (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:36898:21)
+      at async TransformPluginContext.transform (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:36171:11)
+      at async PluginContainer.transform (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:49099:18)
+[2m5:50:23 pm[22m [31m[1m[vite][22m[39m [31mInternal server error: [postcss] D:/FYP/XMedFusion/frontend/src/index.css:230:5: The `bg-white/88` class does not exist. If `bg-white/88` is a custom class, make sure it is defined within a `@layer` directive.[39m
+  Plugin: [35mvite:css[39m
+  File: [36mD:/FYP/XMedFusion/frontend/src/index.css[39m:230:4
+[33m  228|  
+  229|    .figma-workspace-hero {
+  230|      @apply relative overflow-hidden border border-white/80 bg-white/88 p-6 shadow-card md:p-8;
+     |      ^
+  231|      border-radius: 34px;
+  232|    }[39m
+      at Input.error (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\input.js:135:16)
+      at AtRule.error (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\node.js:146:32)
+      at processApply (D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:380:29)
+      at D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:551:9
+      at D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\processTailwindFeatures.js:55:50
+      at async plugins (D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\plugin.js:38:17)
+      at async LazyResult.runAsync (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\lazy-result.js:293:11)
+      at async compileCSS (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:36898:21)
+      at async TransformPluginContext.transform (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:36171:11)
+      at async PluginContainer.transform (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:49099:18)
+[2m5:50:23 pm[22m [31m[1m[vite][22m[39m [31mInternal server error: [postcss] D:/FYP/XMedFusion/frontend/src/index.css:230:5: The `bg-white/88` class does not exist. If `bg-white/88` is a custom class, make sure it is defined within a `@layer` directive.[39m
+  Plugin: [35mvite:css[39m
+  File: [36mD:/FYP/XMedFusion/frontend/src/index.css[39m:230:4
+[33m  228|  
+  229|    .figma-workspace-hero {
+  230|      @apply relative overflow-hidden border border-white/80 bg-white/88 p-6 shadow-card md:p-8;
+     |      ^
+  231|      border-radius: 34px;
+  232|    }[39m
+      at Input.error (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\input.js:135:16)
+      at AtRule.error (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\node.js:146:32)
+      at processApply (D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:380:29)
+      at D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:551:9
+      at D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\processTailwindFeatures.js:55:50
+      at async plugins (D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\plugin.js:38:17)
+      at async LazyResult.runAsync (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\lazy-result.js:293:11)
+      at async compileCSS (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:36898:21)
+      at async TransformPluginContext.transform (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:36171:11)
+      at async PluginContainer.transform (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:49099:18)
+[2m5:50:56 pm[22m [31m[1m[vite][22m[39m [31mInternal server error: [postcss] D:/FYP/XMedFusion/frontend/src/index.css:230:5: The `bg-white/88` class does not exist. If `bg-white/88` is a custom class, make sure it is defined within a `@layer` directive.[39m
+  Plugin: [35mvite:css[39m
+  File: [36mD:/FYP/XMedFusion/frontend/src/index.css[39m:230:4
+[33m  228|  
+  229|    .figma-workspace-hero {
+  230|      @apply relative overflow-hidden border border-white/80 bg-white/88 p-6 shadow-card md:p-8;
+     |      ^
+  231|      border-radius: 34px;
+  232|    }[39m
+      at Input.error (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\input.js:135:16)
+      at AtRule.error (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\node.js:146:32)
+      at processApply (D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:380:29)
+      at D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:551:9
+      at D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\processTailwindFeatures.js:55:50
+      at async plugins (D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\plugin.js:38:17)
+      at async LazyResult.runAsync (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\lazy-result.js:293:11)
+      at async compileCSS (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:36898:21)
+      at async TransformPluginContext.transform (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:36171:11)
+      at async PluginContainer.transform (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:49099:18)
+[2m5:50:56 pm[22m [31m[1m[vite][22m[39m [31mInternal server error: [postcss] D:/FYP/XMedFusion/frontend/src/index.css:230:5: The `bg-white/88` class does not exist. If `bg-white/88` is a custom class, make sure it is defined within a `@layer` directive.[39m
+  Plugin: [35mvite:css[39m
+  File: [36mD:/FYP/XMedFusion/frontend/src/index.css[39m:230:4
+[33m  228|  
+  229|    .figma-workspace-hero {
+  230|      @apply relative overflow-hidden border border-white/80 bg-white/88 p-6 shadow-card md:p-8;
+     |      ^
+  231|      border-radius: 34px;
+  232|    }[39m
+      at Input.error (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\input.js:135:16)
+      at AtRule.error (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\node.js:146:32)
+      at processApply (D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:380:29)
+      at D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:551:9
+      at D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\processTailwindFeatures.js:55:50
+      at async plugins (D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\plugin.js:38:17)
+      at async LazyResult.runAsync (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\lazy-result.js:293:11)
+      at async compileCSS (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:36898:21)
+      at async TransformPluginContext.transform (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:36171:11)
+      at async PluginContainer.transform (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:49099:18)
+[2m5:51:07 pm[22m [31m[1m[vite][22m[39m [31mInternal server error: [postcss] D:/FYP/XMedFusion/frontend/src/index.css:230:5: The `bg-white/88` class does not exist. If `bg-white/88` is a custom class, make sure it is defined within a `@layer` directive.[39m
+  Plugin: [35mvite:css[39m
+  File: [36mD:/FYP/XMedFusion/frontend/src/index.css[39m:230:4
+[33m  228|  
+  229|    .figma-workspace-hero {
+  230|      @apply relative overflow-hidden border border-white/80 bg-white/88 p-6 shadow-card md:p-8;
+     |      ^
+  231|      border-radius: 34px;
+  232|    }[39m
+      at Input.error (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\input.js:135:16)
+      at AtRule.error (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\node.js:146:32)
+      at processApply (D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:380:29)
+      at D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:551:9
+      at D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\processTailwindFeatures.js:55:50
+      at async plugins (D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\plugin.js:38:17)
+      at async LazyResult.runAsync (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\lazy-result.js:293:11)
+      at async compileCSS (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:36898:21)
+      at async TransformPluginContext.transform (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:36171:11)
+      at async PluginContainer.transform (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:49099:18)
+[2m5:51:07 pm[22m [31m[1m[vite][22m[39m [31mInternal server error: [postcss] D:/FYP/XMedFusion/frontend/src/index.css:230:5: The `bg-white/88` class does not exist. If `bg-white/88` is a custom class, make sure it is defined within a `@layer` directive.[39m
+  Plugin: [35mvite:css[39m
+  File: [36mD:/FYP/XMedFusion/frontend/src/index.css[39m:230:4
+[33m  228|  
+  229|    .figma-workspace-hero {
+  230|      @apply relative overflow-hidden border border-white/80 bg-white/88 p-6 shadow-card md:p-8;
+     |      ^
+  231|      border-radius: 34px;
+  232|    }[39m
+      at Input.error (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\input.js:135:16)
+      at AtRule.error (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\node.js:146:32)
+      at processApply (D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:380:29)
+      at D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:551:9
+      at D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\processTailwindFeatures.js:55:50
+      at async plugins (D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\plugin.js:38:17)
+      at async LazyResult.runAsync (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\lazy-result.js:293:11)
+      at async compileCSS (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:36898:21)
+      at async TransformPluginContext.transform (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:36171:11)
+      at async PluginContainer.transform (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:49099:18)
+[2m5:51:23 pm[22m [31m[1m[vite][22m[39m [31mInternal server error: [postcss] D:/FYP/XMedFusion/frontend/src/index.css:230:5: The `bg-white/88` class does not exist. If `bg-white/88` is a custom class, make sure it is defined within a `@layer` directive.[39m
+  Plugin: [35mvite:css[39m
+  File: [36mD:/FYP/XMedFusion/frontend/src/index.css[39m:230:4
+[33m  228|  
+  229|    .figma-workspace-hero {
+  230|      @apply relative overflow-hidden border border-white/80 bg-white/88 p-6 shadow-card md:p-8;
+     |      ^
+  231|      border-radius: 34px;
+  232|    }[39m
+      at Input.error (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\input.js:135:16)
+      at AtRule.error (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\node.js:146:32)
+      at processApply (D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:380:29)
+      at D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:551:9
+      at D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\processTailwindFeatures.js:55:50
+      at async plugins (D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\plugin.js:38:17)
+      at async LazyResult.runAsync (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\lazy-result.js:293:11)
+      at async compileCSS (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:36898:21)
+      at async TransformPluginContext.transform (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:36171:11)
+      at async PluginContainer.transform (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:49099:18)
+[2m5:51:23 pm[22m [31m[1m[vite][22m[39m [31mInternal server error: [postcss] D:/FYP/XMedFusion/frontend/src/index.css:230:5: The `bg-white/88` class does not exist. If `bg-white/88` is a custom class, make sure it is defined within a `@layer` directive.[39m
+  Plugin: [35mvite:css[39m
+  File: [36mD:/FYP/XMedFusion/frontend/src/index.css[39m:230:4
+[33m  228|  
+  229|    .figma-workspace-hero {
+  230|      @apply relative overflow-hidden border border-white/80 bg-white/88 p-6 shadow-card md:p-8;
+     |      ^
+  231|      border-radius: 34px;
+  232|    }[39m
+      at Input.error (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\input.js:135:16)
+      at AtRule.error (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\node.js:146:32)
+      at processApply (D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:380:29)
+      at D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:551:9
+      at D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\processTailwindFeatures.js:55:50
+      at async plugins (D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\plugin.js:38:17)
+      at async LazyResult.runAsync (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\lazy-result.js:293:11)
+      at async compileCSS (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:36898:21)
+      at async TransformPluginContext.transform (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:36171:11)
+      at async PluginContainer.transform (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:49099:18)
+[2m5:51:35 pm[22m [31m[1m[vite][22m[39m [31mInternal server error: [postcss] D:/FYP/XMedFusion/frontend/src/index.css:230:5: The `bg-white/88` class does not exist. If `bg-white/88` is a custom class, make sure it is defined within a `@layer` directive.[39m
+  Plugin: [35mvite:css[39m
+  File: [36mD:/FYP/XMedFusion/frontend/src/index.css[39m:230:4
+[33m  228|  
+  229|    .figma-workspace-hero {
+  230|      @apply relative overflow-hidden border border-white/80 bg-white/88 p-6 shadow-card md:p-8;
+     |      ^
+  231|      border-radius: 34px;
+  232|    }[39m
+      at Input.error (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\input.js:135:16)
+      at AtRule.error (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\node.js:146:32)
+      at processApply (D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:380:29)
+      at D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:551:9
+      at D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\processTailwindFeatures.js:55:50
+      at async plugins (D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\plugin.js:38:17)
+      at async LazyResult.runAsync (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\lazy-result.js:293:11)
+      at async compileCSS (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:36898:21)
+      at async TransformPluginContext.transform (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:36171:11)
+      at async PluginContainer.transform (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:49099:18)
+[2m5:51:35 pm[22m [31m[1m[vite][22m[39m [31mInternal server error: [postcss] D:/FYP/XMedFusion/frontend/src/index.css:230:5: The `bg-white/88` class does not exist. If `bg-white/88` is a custom class, make sure it is defined within a `@layer` directive.[39m
+  Plugin: [35mvite:css[39m
+  File: [36mD:/FYP/XMedFusion/frontend/src/index.css[39m:230:4
+[33m  228|  
+  229|    .figma-workspace-hero {
+  230|      @apply relative overflow-hidden border border-white/80 bg-white/88 p-6 shadow-card md:p-8;
+     |      ^
+  231|      border-radius: 34px;
+  232|    }[39m
+      at Input.error (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\input.js:135:16)
+      at AtRule.error (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\node.js:146:32)
+      at processApply (D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:380:29)
+      at D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:551:9
+      at D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\processTailwindFeatures.js:55:50
+      at async plugins (D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\plugin.js:38:17)
+      at async LazyResult.runAsync (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\lazy-result.js:293:11)
+      at async compileCSS (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:36898:21)
+      at async TransformPluginContext.transform (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:36171:11)
+      at async PluginContainer.transform (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:49099:18)
+[2m5:51:52 pm[22m [31m[1m[vite][22m[39m [31mInternal server error: [postcss] D:/FYP/XMedFusion/frontend/src/index.css:230:5: The `bg-white/88` class does not exist. If `bg-white/88` is a custom class, make sure it is defined within a `@layer` directive.[39m
+  Plugin: [35mvite:css[39m
+  File: [36mD:/FYP/XMedFusion/frontend/src/index.css[39m:230:4
+[33m  228|  
+  229|    .figma-workspace-hero {
+  230|      @apply relative overflow-hidden border border-white/80 bg-white/88 p-6 shadow-card md:p-8;
+     |      ^
+  231|      border-radius: 34px;
+  232|    }[39m
+      at Input.error (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\input.js:135:16)
+      at AtRule.error (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\node.js:146:32)
+      at processApply (D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:380:29)
+      at D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:551:9
+      at D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\processTailwindFeatures.js:55:50
+      at async plugins (D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\plugin.js:38:17)
+      at async LazyResult.runAsync (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\lazy-result.js:293:11)
+      at async compileCSS (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:36898:21)
+      at async TransformPluginContext.transform (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:36171:11)
+      at async PluginContainer.transform (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:49099:18)
+[2m5:51:52 pm[22m [31m[1m[vite][22m[39m [31mInternal server error: [postcss] D:/FYP/XMedFusion/frontend/src/index.css:230:5: The `bg-white/88` class does not exist. If `bg-white/88` is a custom class, make sure it is defined within a `@layer` directive.[39m
+  Plugin: [35mvite:css[39m
+  File: [36mD:/FYP/XMedFusion/frontend/src/index.css[39m:230:4
+[33m  228|  
+  229|    .figma-workspace-hero {
+  230|      @apply relative overflow-hidden border border-white/80 bg-white/88 p-6 shadow-card md:p-8;
+     |      ^
+  231|      border-radius: 34px;
+  232|    }[39m
+      at Input.error (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\input.js:135:16)
+      at AtRule.error (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\node.js:146:32)
+      at processApply (D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:380:29)
+      at D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:551:9
+      at D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\processTailwindFeatures.js:55:50
+      at async plugins (D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\plugin.js:38:17)
+      at async LazyResult.runAsync (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\lazy-result.js:293:11)
+      at async compileCSS (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:36898:21)
+      at async TransformPluginContext.transform (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:36171:11)
+      at async PluginContainer.transform (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:49099:18)
+[2m5:52:04 pm[22m [31m[1m[vite][22m[39m [31mInternal server error: [postcss] D:/FYP/XMedFusion/frontend/src/index.css:230:5: The `bg-white/88` class does not exist. If `bg-white/88` is a custom class, make sure it is defined within a `@layer` directive.[39m
+  Plugin: [35mvite:css[39m
+  File: [36mD:/FYP/XMedFusion/frontend/src/index.css[39m:230:4
+[33m  228|  
+  229|    .figma-workspace-hero {
+  230|      @apply relative overflow-hidden border border-white/80 bg-white/88 p-6 shadow-card md:p-8;
+     |      ^
+  231|      border-radius: 34px;
+  232|    }[39m
+      at Input.error (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\input.js:135:16)
+      at AtRule.error (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\node.js:146:32)
+      at processApply (D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:380:29)
+      at D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:551:9
+      at D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\processTailwindFeatures.js:55:50
+      at async plugins (D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\plugin.js:38:17)
+      at async LazyResult.runAsync (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\lazy-result.js:293:11)
+      at async compileCSS (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:36898:21)
+      at async TransformPluginContext.transform (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:36171:11)
+      at async PluginContainer.transform (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:49099:18)
+[2m5:52:04 pm[22m [31m[1m[vite][22m[39m [31mInternal server error: [postcss] D:/FYP/XMedFusion/frontend/src/index.css:230:5: The `bg-white/88` class does not exist. If `bg-white/88` is a custom class, make sure it is defined within a `@layer` directive.[39m
+  Plugin: [35mvite:css[39m
+  File: [36mD:/FYP/XMedFusion/frontend/src/index.css[39m:230:4
+[33m  228|  
+  229|    .figma-workspace-hero {
+  230|      @apply relative overflow-hidden border border-white/80 bg-white/88 p-6 shadow-card md:p-8;
+     |      ^
+  231|      border-radius: 34px;
+  232|    }[39m
+      at Input.error (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\input.js:135:16)
+      at AtRule.error (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\node.js:146:32)
+      at processApply (D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:380:29)
+      at D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:551:9
+      at D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\processTailwindFeatures.js:55:50
+      at async plugins (D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\plugin.js:38:17)
+      at async LazyResult.runAsync (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\lazy-result.js:293:11)
+      at async compileCSS (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:36898:21)
+      at async TransformPluginContext.transform (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:36171:11)
+      at async PluginContainer.transform (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:49099:18)
+[2m5:52:12 pm[22m [31m[1m[vite][22m[39m [31mInternal server error: [postcss] D:/FYP/XMedFusion/frontend/src/index.css:230:5: The `bg-white/88` class does not exist. If `bg-white/88` is a custom class, make sure it is defined within a `@layer` directive.[39m
+  Plugin: [35mvite:css[39m
+  File: [36mD:/FYP/XMedFusion/frontend/src/index.css[39m:230:4
+[33m  228|  
+  229|    .figma-workspace-hero {
+  230|      @apply relative overflow-hidden border border-white/80 bg-white/88 p-6 shadow-card md:p-8;
+     |      ^
+  231|      border-radius: 34px;
+  232|    }[39m
+      at Input.error (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\input.js:135:16)
+      at AtRule.error (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\node.js:146:32)
+      at processApply (D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:380:29)
+      at D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:551:9
+      at D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\processTailwindFeatures.js:55:50
+      at async plugins (D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\plugin.js:38:17)
+      at async LazyResult.runAsync (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\lazy-result.js:293:11)
+      at async compileCSS (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:36898:21)
+      at async TransformPluginContext.transform (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:36171:11)
+      at async PluginContainer.transform (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:49099:18)
+[2m5:52:12 pm[22m [31m[1m[vite][22m[39m [31mInternal server error: [postcss] D:/FYP/XMedFusion/frontend/src/index.css:230:5: The `bg-white/88` class does not exist. If `bg-white/88` is a custom class, make sure it is defined within a `@layer` directive.[39m
+  Plugin: [35mvite:css[39m
+  File: [36mD:/FYP/XMedFusion/frontend/src/index.css[39m:230:4
+[33m  228|  
+  229|    .figma-workspace-hero {
+  230|      @apply relative overflow-hidden border border-white/80 bg-white/88 p-6 shadow-card md:p-8;
+     |      ^
+  231|      border-radius: 34px;
+  232|    }[39m
+      at Input.error (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\input.js:135:16)
+      at AtRule.error (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\node.js:146:32)
+      at processApply (D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:380:29)
+      at D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:551:9
+      at D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\processTailwindFeatures.js:55:50
+      at async plugins (D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\plugin.js:38:17)
+      at async LazyResult.runAsync (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\lazy-result.js:293:11)
+      at async compileCSS (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:36898:21)
+      at async TransformPluginContext.transform (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:36171:11)
+      at async PluginContainer.transform (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:49099:18)
+[2m5:52:19 pm[22m [31m[1m[vite][22m[39m [31mInternal server error: [postcss] D:/FYP/XMedFusion/frontend/src/index.css:230:5: The `bg-white/88` class does not exist. If `bg-white/88` is a custom class, make sure it is defined within a `@layer` directive.[39m
+  Plugin: [35mvite:css[39m
+  File: [36mD:/FYP/XMedFusion/frontend/src/index.css[39m:230:4
+[33m  228|  
+  229|    .figma-workspace-hero {
+  230|      @apply relative overflow-hidden border border-white/80 bg-white/88 p-6 shadow-card md:p-8;
+     |      ^
+  231|      border-radius: 34px;
+  232|    }[39m
+      at Input.error (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\input.js:135:16)
+      at AtRule.error (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\node.js:146:32)
+      at processApply (D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:380:29)
+      at D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:551:9
+      at D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\processTailwindFeatures.js:55:50
+      at async plugins (D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\plugin.js:38:17)
+      at async LazyResult.runAsync (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\lazy-result.js:293:11)
+      at async compileCSS (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:36898:21)
+      at async TransformPluginContext.transform (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:36171:11)
+      at async PluginContainer.transform (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:49099:18)
+[2m5:52:19 pm[22m [31m[1m[vite][22m[39m [31mInternal server error: [postcss] D:/FYP/XMedFusion/frontend/src/index.css:230:5: The `bg-white/88` class does not exist. If `bg-white/88` is a custom class, make sure it is defined within a `@layer` directive.[39m
+  Plugin: [35mvite:css[39m
+  File: [36mD:/FYP/XMedFusion/frontend/src/index.css[39m:230:4
+[33m  228|  
+  229|    .figma-workspace-hero {
+  230|      @apply relative overflow-hidden border border-white/80 bg-white/88 p-6 shadow-card md:p-8;
+     |      ^
+  231|      border-radius: 34px;
+  232|    }[39m
+      at Input.error (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\input.js:135:16)
+      at AtRule.error (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\node.js:146:32)
+      at processApply (D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:380:29)
+      at D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:551:9
+      at D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\processTailwindFeatures.js:55:50
+      at async plugins (D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\plugin.js:38:17)
+      at async LazyResult.runAsync (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\lazy-result.js:293:11)
+      at async compileCSS (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:36898:21)
+      at async TransformPluginContext.transform (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:36171:11)
+      at async PluginContainer.transform (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:49099:18)
+[2m5:52:28 pm[22m [31m[1m[vite][22m[39m [31mInternal server error: [postcss] D:/FYP/XMedFusion/frontend/src/index.css:230:5: The `bg-white/88` class does not exist. If `bg-white/88` is a custom class, make sure it is defined within a `@layer` directive.[39m
+  Plugin: [35mvite:css[39m
+  File: [36mD:/FYP/XMedFusion/frontend/src/index.css[39m:230:4
+[33m  228|  
+  229|    .figma-workspace-hero {
+  230|      @apply relative overflow-hidden border border-white/80 bg-white/88 p-6 shadow-card md:p-8;
+     |      ^
+  231|      border-radius: 34px;
+  232|    }[39m
+      at Input.error (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\input.js:135:16)
+      at AtRule.error (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\node.js:146:32)
+      at processApply (D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:380:29)
+      at D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:551:9
+      at D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\processTailwindFeatures.js:55:50
+      at async plugins (D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\plugin.js:38:17)
+      at async LazyResult.runAsync (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\lazy-result.js:293:11)
+      at async compileCSS (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:36898:21)
+      at async TransformPluginContext.transform (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:36171:11)
+      at async PluginContainer.transform (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:49099:18)
+[2m5:52:28 pm[22m [31m[1m[vite][22m[39m [31mInternal server error: [postcss] D:/FYP/XMedFusion/frontend/src/index.css:230:5: The `bg-white/88` class does not exist. If `bg-white/88` is a custom class, make sure it is defined within a `@layer` directive.[39m
+  Plugin: [35mvite:css[39m
+  File: [36mD:/FYP/XMedFusion/frontend/src/index.css[39m:230:4
+[33m  228|  
+  229|    .figma-workspace-hero {
+  230|      @apply relative overflow-hidden border border-white/80 bg-white/88 p-6 shadow-card md:p-8;
+     |      ^
+  231|      border-radius: 34px;
+  232|    }[39m
+      at Input.error (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\input.js:135:16)
+      at AtRule.error (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\node.js:146:32)
+      at processApply (D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:380:29)
+      at D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:551:9
+      at D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\processTailwindFeatures.js:55:50
+      at async plugins (D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\plugin.js:38:17)
+      at async LazyResult.runAsync (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\lazy-result.js:293:11)
+      at async compileCSS (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:36898:21)
+      at async TransformPluginContext.transform (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:36171:11)
+      at async PluginContainer.transform (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:49099:18)
+[2m5:52:51 pm[22m [31m[1m[vite][22m[39m [31mInternal server error: [postcss] D:/FYP/XMedFusion/frontend/src/index.css:230:5: The `bg-white/88` class does not exist. If `bg-white/88` is a custom class, make sure it is defined within a `@layer` directive.[39m
+  Plugin: [35mvite:css[39m
+  File: [36mD:/FYP/XMedFusion/frontend/src/index.css[39m:230:4
+[33m  228|  
+  229|    .figma-workspace-hero {
+  230|      @apply relative overflow-hidden border border-white/80 bg-white/88 p-6 shadow-card md:p-8;
+     |      ^
+  231|      border-radius: 34px;
+  232|    }[39m
+      at Input.error (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\input.js:135:16)
+      at AtRule.error (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\node.js:146:32)
+      at processApply (D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:380:29)
+      at D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:551:9
+      at D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\processTailwindFeatures.js:55:50
+      at async plugins (D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\plugin.js:38:17)
+      at async LazyResult.runAsync (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\lazy-result.js:293:11)
+      at async compileCSS (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:36898:21)
+      at async TransformPluginContext.transform (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:36171:11)
+      at async PluginContainer.transform (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:49099:18)
+[2m5:52:51 pm[22m [31m[1m[vite][22m[39m [31mInternal server error: [postcss] D:/FYP/XMedFusion/frontend/src/index.css:230:5: The `bg-white/88` class does not exist. If `bg-white/88` is a custom class, make sure it is defined within a `@layer` directive.[39m
+  Plugin: [35mvite:css[39m
+  File: [36mD:/FYP/XMedFusion/frontend/src/index.css[39m:230:4
+[33m  228|  
+  229|    .figma-workspace-hero {
+  230|      @apply relative overflow-hidden border border-white/80 bg-white/88 p-6 shadow-card md:p-8;
+     |      ^
+  231|      border-radius: 34px;
+  232|    }[39m
+      at Input.error (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\input.js:135:16)
+      at AtRule.error (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\node.js:146:32)
+      at processApply (D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:380:29)
+      at D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:551:9
+      at D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\processTailwindFeatures.js:55:50
+      at async plugins (D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\plugin.js:38:17)
+      at async LazyResult.runAsync (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\lazy-result.js:293:11)
+      at async compileCSS (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:36898:21)
+      at async TransformPluginContext.transform (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:36171:11)
+      at async PluginContainer.transform (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:49099:18)
+[2m5:53:16 pm[22m [31m[1m[vite][22m[39m [31mInternal server error: [postcss] D:/FYP/XMedFusion/frontend/src/index.css:230:5: The `bg-white/88` class does not exist. If `bg-white/88` is a custom class, make sure it is defined within a `@layer` directive.[39m
+  Plugin: [35mvite:css[39m
+  File: [36mD:/FYP/XMedFusion/frontend/src/index.css[39m:230:4
+[33m  228|  
+  229|    .figma-workspace-hero {
+  230|      @apply relative overflow-hidden border border-white/80 bg-white/88 p-6 shadow-card md:p-8;
+     |      ^
+  231|      border-radius: 34px;
+  232|    }[39m
+      at Input.error (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\input.js:135:16)
+      at AtRule.error (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\node.js:146:32)
+      at processApply (D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:380:29)
+      at D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:551:9
+      at D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\processTailwindFeatures.js:55:50
+      at async plugins (D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\plugin.js:38:17)
+      at async LazyResult.runAsync (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\lazy-result.js:293:11)
+      at async compileCSS (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:36898:21)
+      at async TransformPluginContext.transform (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:36171:11)
+      at async PluginContainer.transform (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:49099:18)
+[2m5:53:16 pm[22m [31m[1m[vite][22m[39m [31mInternal server error: [postcss] D:/FYP/XMedFusion/frontend/src/index.css:230:5: The `bg-white/88` class does not exist. If `bg-white/88` is a custom class, make sure it is defined within a `@layer` directive.[39m
+  Plugin: [35mvite:css[39m
+  File: [36mD:/FYP/XMedFusion/frontend/src/index.css[39m:230:4
+[33m  228|  
+  229|    .figma-workspace-hero {
+  230|      @apply relative overflow-hidden border border-white/80 bg-white/88 p-6 shadow-card md:p-8;
+     |      ^
+  231|      border-radius: 34px;
+  232|    }[39m
+      at Input.error (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\input.js:135:16)
+      at AtRule.error (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\node.js:146:32)
+      at processApply (D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:380:29)
+      at D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:551:9
+      at D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\processTailwindFeatures.js:55:50
+      at async plugins (D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\plugin.js:38:17)
+      at async LazyResult.runAsync (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\lazy-result.js:293:11)
+      at async compileCSS (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:36898:21)
+      at async TransformPluginContext.transform (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:36171:11)
+      at async PluginContainer.transform (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:49099:18)
+[2m5:53:20 pm[22m [31m[1m[vite][22m[39m [31mInternal server error: [postcss] D:/FYP/XMedFusion/frontend/src/index.css:230:5: The `bg-white/88` class does not exist. If `bg-white/88` is a custom class, make sure it is defined within a `@layer` directive.[39m
+  Plugin: [35mvite:css[39m
+  File: [36mD:/FYP/XMedFusion/frontend/src/index.css[39m:230:4
+[33m  228|  
+  229|    .figma-workspace-hero {
+  230|      @apply relative overflow-hidden border border-white/80 bg-white/88 p-6 shadow-card md:p-8;
+     |      ^
+  231|      border-radius: 34px;
+  232|    }[39m
+      at Input.error (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\input.js:135:16)
+      at AtRule.error (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\node.js:146:32)
+      at processApply (D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:380:29)
+      at D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:551:9
+      at D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\processTailwindFeatures.js:55:50
+      at async plugins (D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\plugin.js:38:17)
+      at async LazyResult.runAsync (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\lazy-result.js:293:11)
+      at async compileCSS (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:36898:21)
+      at async TransformPluginContext.transform (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:36171:11)
+      at async PluginContainer.transform (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:49099:18)
+[2m5:53:20 pm[22m [31m[1m[vite][22m[39m [31mInternal server error: [postcss] D:/FYP/XMedFusion/frontend/src/index.css:230:5: The `bg-white/88` class does not exist. If `bg-white/88` is a custom class, make sure it is defined within a `@layer` directive.[39m
+  Plugin: [35mvite:css[39m
+  File: [36mD:/FYP/XMedFusion/frontend/src/index.css[39m:230:4
+[33m  228|  
+  229|    .figma-workspace-hero {
+  230|      @apply relative overflow-hidden border border-white/80 bg-white/88 p-6 shadow-card md:p-8;
+     |      ^
+  231|      border-radius: 34px;
+  232|    }[39m
+      at Input.error (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\input.js:135:16)
+      at AtRule.error (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\node.js:146:32)
+      at processApply (D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:380:29)
+      at D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:551:9
+      at D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\processTailwindFeatures.js:55:50
+      at async plugins (D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\plugin.js:38:17)
+      at async LazyResult.runAsync (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\lazy-result.js:293:11)
+      at async compileCSS (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:36898:21)
+      at async TransformPluginContext.transform (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:36171:11)
+      at async PluginContainer.transform (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:49099:18)
+[2m5:53:24 pm[22m [31m[1m[vite][22m[39m [31mInternal server error: [postcss] D:/FYP/XMedFusion/frontend/src/index.css:230:5: The `bg-white/88` class does not exist. If `bg-white/88` is a custom class, make sure it is defined within a `@layer` directive.[39m
+  Plugin: [35mvite:css[39m
+  File: [36mD:/FYP/XMedFusion/frontend/src/index.css[39m:230:4
+[33m  228|  
+  229|    .figma-workspace-hero {
+  230|      @apply relative overflow-hidden border border-white/80 bg-white/88 p-6 shadow-card md:p-8;
+     |      ^
+  231|      border-radius: 34px;
+  232|    }[39m
+      at Input.error (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\input.js:135:16)
+      at AtRule.error (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\node.js:146:32)
+      at processApply (D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:380:29)
+      at D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:551:9
+      at D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\processTailwindFeatures.js:55:50
+      at async plugins (D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\plugin.js:38:17)
+      at async LazyResult.runAsync (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\lazy-result.js:293:11)
+      at async compileCSS (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:36898:21)
+      at async TransformPluginContext.transform (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:36171:11)
+      at async PluginContainer.transform (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:49099:18)
+[2m5:53:24 pm[22m [31m[1m[vite][22m[39m [31mInternal server error: [postcss] D:/FYP/XMedFusion/frontend/src/index.css:230:5: The `bg-white/88` class does not exist. If `bg-white/88` is a custom class, make sure it is defined within a `@layer` directive.[39m
+  Plugin: [35mvite:css[39m
+  File: [36mD:/FYP/XMedFusion/frontend/src/index.css[39m:230:4
+[33m  228|  
+  229|    .figma-workspace-hero {
+  230|      @apply relative overflow-hidden border border-white/80 bg-white/88 p-6 shadow-card md:p-8;
+     |      ^
+  231|      border-radius: 34px;
+  232|    }[39m
+      at Input.error (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\input.js:135:16)
+      at AtRule.error (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\node.js:146:32)
+      at processApply (D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:380:29)
+      at D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:551:9
+      at D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\processTailwindFeatures.js:55:50
+      at async plugins (D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\plugin.js:38:17)
+      at async LazyResult.runAsync (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\lazy-result.js:293:11)
+      at async compileCSS (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:36898:21)
+      at async TransformPluginContext.transform (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:36171:11)
+      at async PluginContainer.transform (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:49099:18)
+[2m5:53:33 pm[22m [31m[1m[vite][22m[39m [31mInternal server error: [postcss] D:/FYP/XMedFusion/frontend/src/index.css:230:5: The `bg-white/88` class does not exist. If `bg-white/88` is a custom class, make sure it is defined within a `@layer` directive.[39m
+  Plugin: [35mvite:css[39m
+  File: [36mD:/FYP/XMedFusion/frontend/src/index.css[39m:230:4
+[33m  228|  
+  229|    .figma-workspace-hero {
+  230|      @apply relative overflow-hidden border border-white/80 bg-white/88 p-6 shadow-card md:p-8;
+     |      ^
+  231|      border-radius: 34px;
+  232|    }[39m
+      at Input.error (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\input.js:135:16)
+      at AtRule.error (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\node.js:146:32)
+      at processApply (D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:380:29)
+      at D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:551:9
+      at D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\processTailwindFeatures.js:55:50
+      at async plugins (D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\plugin.js:38:17)
+      at async LazyResult.runAsync (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\lazy-result.js:293:11)
+      at async compileCSS (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:36898:21)
+      at async TransformPluginContext.transform (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:36171:11)
+      at async PluginContainer.transform (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:49099:18)
+[2m5:53:33 pm[22m [31m[1m[vite][22m[39m [31mInternal server error: [postcss] D:/FYP/XMedFusion/frontend/src/index.css:230:5: The `bg-white/88` class does not exist. If `bg-white/88` is a custom class, make sure it is defined within a `@layer` directive.[39m
+  Plugin: [35mvite:css[39m
+  File: [36mD:/FYP/XMedFusion/frontend/src/index.css[39m:230:4
+[33m  228|  
+  229|    .figma-workspace-hero {
+  230|      @apply relative overflow-hidden border border-white/80 bg-white/88 p-6 shadow-card md:p-8;
+     |      ^
+  231|      border-radius: 34px;
+  232|    }[39m
+      at Input.error (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\input.js:135:16)
+      at AtRule.error (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\node.js:146:32)
+      at processApply (D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:380:29)
+      at D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:551:9
+      at D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\processTailwindFeatures.js:55:50
+      at async plugins (D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\plugin.js:38:17)
+      at async LazyResult.runAsync (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\lazy-result.js:293:11)
+      at async compileCSS (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:36898:21)
+      at async TransformPluginContext.transform (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:36171:11)
+      at async PluginContainer.transform (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:49099:18)
+[2m5:54:01 pm[22m [31m[1m[vite][22m[39m [31mInternal server error: [postcss] D:/FYP/XMedFusion/frontend/src/index.css:230:5: The `bg-white/88` class does not exist. If `bg-white/88` is a custom class, make sure it is defined within a `@layer` directive.[39m
+  Plugin: [35mvite:css[39m
+  File: [36mD:/FYP/XMedFusion/frontend/src/index.css[39m:230:4
+[33m  228|  
+  229|    .figma-workspace-hero {
+  230|      @apply relative overflow-hidden border border-white/80 bg-white/88 p-6 shadow-card md:p-8;
+     |      ^
+  231|      border-radius: 34px;
+  232|    }[39m
+      at Input.error (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\input.js:135:16)
+      at AtRule.error (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\node.js:146:32)
+      at processApply (D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:380:29)
+      at D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:551:9
+      at D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\processTailwindFeatures.js:55:50
+      at async plugins (D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\plugin.js:38:17)
+      at async LazyResult.runAsync (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\lazy-result.js:293:11)
+      at async compileCSS (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:36898:21)
+      at async TransformPluginContext.transform (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:36171:11)
+      at async PluginContainer.transform (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:49099:18)
+[2m5:54:01 pm[22m [31m[1m[vite][22m[39m [31mInternal server error: [postcss] D:/FYP/XMedFusion/frontend/src/index.css:230:5: The `bg-white/88` class does not exist. If `bg-white/88` is a custom class, make sure it is defined within a `@layer` directive.[39m
+  Plugin: [35mvite:css[39m
+  File: [36mD:/FYP/XMedFusion/frontend/src/index.css[39m:230:4
+[33m  228|  
+  229|    .figma-workspace-hero {
+  230|      @apply relative overflow-hidden border border-white/80 bg-white/88 p-6 shadow-card md:p-8;
+     |      ^
+  231|      border-radius: 34px;
+  232|    }[39m
+      at Input.error (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\input.js:135:16)
+      at AtRule.error (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\node.js:146:32)
+      at processApply (D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:380:29)
+      at D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:551:9
+      at D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\processTailwindFeatures.js:55:50
+      at async plugins (D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\plugin.js:38:17)
+      at async LazyResult.runAsync (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\lazy-result.js:293:11)
+      at async compileCSS (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:36898:21)
+      at async TransformPluginContext.transform (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:36171:11)
+      at async PluginContainer.transform (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:49099:18)
+[2m5:54:21 pm[22m [31m[1m[vite][22m[39m Pre-transform error: [postcss] D:/FYP/XMedFusion/frontend/src/index.css:230:5: The `bg-white/88` class does not exist. If `bg-white/88` is a custom class, make sure it is defined within a `@layer` directive.
+[2m5:54:21 pm[22m [31m[1m[vite][22m[39m [31mInternal server error: [postcss] D:/FYP/XMedFusion/frontend/src/index.css:230:5: The `bg-white/88` class does not exist. If `bg-white/88` is a custom class, make sure it is defined within a `@layer` directive.[39m
+  Plugin: [35mvite:css[39m
+  File: [36mD:/FYP/XMedFusion/frontend/src/index.css[39m:230:4
+[33m  228|  
+  229|    .figma-workspace-hero {
+  230|      @apply relative overflow-hidden border border-white/80 bg-white/88 p-6 shadow-card md:p-8;
+     |      ^
+  231|      border-radius: 34px;
+  232|    }[39m
+      at Input.error (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\input.js:135:16)
+      at AtRule.error (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\node.js:146:32)
+      at processApply (D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:380:29)
+      at D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:551:9
+      at D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\processTailwindFeatures.js:55:50
+      at async plugins (D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\plugin.js:38:17)
+      at async LazyResult.runAsync (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\lazy-result.js:293:11)
+      at async compileCSS (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:36898:21)
+      at async TransformPluginContext.transform (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:36171:11)
+      at async PluginContainer.transform (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:49099:18)
+[2m5:54:21 pm[22m [31m[1m[vite][22m[39m [31mInternal server error: [postcss] D:/FYP/XMedFusion/frontend/src/index.css:230:5: The `bg-white/88` class does not exist. If `bg-white/88` is a custom class, make sure it is defined within a `@layer` directive.[39m
+  Plugin: [35mvite:css[39m
+  File: [36mD:/FYP/XMedFusion/frontend/src/index.css[39m:230:4
+[33m  228|  
+  229|    .figma-workspace-hero {
+  230|      @apply relative overflow-hidden border border-white/80 bg-white/88 p-6 shadow-card md:p-8;
+     |      ^
+  231|      border-radius: 34px;
+  232|    }[39m
+      at Input.error (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\input.js:135:16)
+      at AtRule.error (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\node.js:146:32)
+      at processApply (D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:380:29)
+      at D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:551:9
+      at D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\processTailwindFeatures.js:55:50
+      at async plugins (D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\plugin.js:38:17)
+      at async LazyResult.runAsync (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\lazy-result.js:293:11)
+      at async compileCSS (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:36898:21)
+      at async TransformPluginContext.transform (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:36171:11)
+      at async PluginContainer.transform (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:49099:18)
+[2m6:04:53 pm[22m [31m[1m[vite][22m[39m [31mInternal server error: [postcss] D:/FYP/XMedFusion/frontend/src/index.css:492:5: The `bg-white/88` class does not exist. If `bg-white/88` is a custom class, make sure it is defined within a `@layer` directive.[39m
+  Plugin: [35mvite:css[39m
+  File: [36mD:/FYP/XMedFusion/frontend/src/index.css[39m:492:4
+[33m  490|  
+  491|    .radiology-image-caption {
+  492|      @apply absolute bottom-4 left-4 right-4 z-10 flex items-center justify-between gap-3 rounded-[22px] border border-white/25 bg-white/88 px-4 py-3 text-foreground shadow-card backdrop-blur-md;
+     |      ^
+  493|    }
+  494|  [39m
+      at Input.error (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\input.js:135:16)
+      at AtRule.error (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\node.js:146:32)
+      at processApply (D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:380:29)
+      at D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:551:9
+      at D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\processTailwindFeatures.js:55:50
+      at async plugins (D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\plugin.js:38:17)
+      at async LazyResult.runAsync (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\lazy-result.js:293:11)
+      at async compileCSS (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:36898:21)
+      at async TransformPluginContext.transform (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:36171:11)
+      at async PluginContainer.transform (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:49099:18)
+[2m6:04:53 pm[22m [31m[1m[vite][22m[39m [31mInternal server error: [postcss] D:/FYP/XMedFusion/frontend/src/index.css:492:5: The `bg-white/88` class does not exist. If `bg-white/88` is a custom class, make sure it is defined within a `@layer` directive.[39m
+  Plugin: [35mvite:css[39m
+  File: [36mD:/FYP/XMedFusion/frontend/src/index.css[39m:492:4
+[33m  490|  
+  491|    .radiology-image-caption {
+  492|      @apply absolute bottom-4 left-4 right-4 z-10 flex items-center justify-between gap-3 rounded-[22px] border border-white/25 bg-white/88 px-4 py-3 text-foreground shadow-card backdrop-blur-md;
+     |      ^
+  493|    }
+  494|  [39m
+      at Input.error (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\input.js:135:16)
+      at AtRule.error (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\node.js:146:32)
+      at processApply (D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:380:29)
+      at D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:551:9
+      at D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\processTailwindFeatures.js:55:50
+      at async plugins (D:\FYP\XMedFusion\frontend\node_modules\tailwindcss\lib\plugin.js:38:17)
+      at async LazyResult.runAsync (D:\FYP\XMedFusion\frontend\node_modules\postcss\lib\lazy-result.js:293:11)
+      at async compileCSS (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:36898:21)
+      at async TransformPluginContext.transform (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:36171:11)
+      at async PluginContainer.transform (file:///D:/FYP/XMedFusion/frontend/node_modules/vite/dist/node/chunks/dep-C6uTJdX2.js:49099:18)

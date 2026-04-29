@@ -20,6 +20,9 @@ import open_clip
 
 import config
 
+REPORT_CONTEXT_WINDOW = min(config.CONTEXT_WINDOW, 8192)
+LLM_TIMEOUT_SECONDS = 180
+
 # Suppress warnings
 warnings.filterwarnings("ignore")
 
@@ -33,6 +36,22 @@ DISEASES = [
     "Infiltrate", "Consolidation", "Lung Opacity", "Nodule", 
     "Atelectasis", "Fracture"
 ]
+
+# Earlier BioMedCLIP checkpoints in this project were trained against the
+# 14-label CheXpert-style target set saved alongside thresholds.json.
+LEGACY_CHEXPERT_LABELS = [
+    "Enlarged Cardiomediastinum", "Cardiomegaly", "Lung Opacity",
+    "Lung Lesion", "Edema", "Consolidation", "Pneumonia",
+    "Atelectasis", "Pneumothorax", "Pleural Effusion", "Pleural Other",
+    "Fracture", "Support Devices", "No Finding"
+]
+
+CLASSIFIER_LABEL_ALIASES = {
+    "Cardiomegaly": ["Cardiomegaly", "Enlarged Cardiomediastinum"],
+    "Pleural Effusion": ["Pleural Effusion", "Pleural Other"],
+    "Infiltrate": ["Infiltrate", "Pneumonia"],
+    "Nodule": ["Nodule", "Lung Lesion"],
+}
 
 # Zero-Shot Prompts (The "Verifier")
 PATHOLOGY_CONFIG = {
@@ -132,6 +151,62 @@ class BioMedCLIPClassifierHead(nn.Module):
     def forward(self, features):
         return self.head(features) + self.residual(features)
 
+class LegacyBioMedCLIPClassifierHead(nn.Module):
+    """Older single-linear-layer head used by earlier saved checkpoints."""
+    def __init__(self, num_classes, input_dim=512):
+        super().__init__()
+        self.head = nn.Linear(input_dim, num_classes)
+
+    def forward(self, features):
+        return self.head(features)
+
+def _infer_classifier_output_count(state_dict):
+    for key in ("head.weight", "head.8.weight", "residual.weight"):
+        if key in state_dict:
+            return int(state_dict[key].shape[0])
+    return len(DISEASES)
+
+def _labels_for_output_count(output_count):
+    if output_count == len(DISEASES):
+        return DISEASES
+    if output_count == len(LEGACY_CHEXPERT_LABELS):
+        return LEGACY_CHEXPERT_LABELS
+    return [f"class_{idx}" for idx in range(output_count)]
+
+def build_classifier_for_state_dict(state_dict):
+    output_count = _infer_classifier_output_count(state_dict)
+    if "head.weight" in state_dict and "head.0.weight" not in state_dict:
+        head = LegacyBioMedCLIPClassifierHead(num_classes=output_count).to(device)
+    else:
+        head = BioMedCLIPClassifierHead(num_classes=output_count).to(device)
+    head.label_names = _labels_for_output_count(output_count)
+    return head
+
+def _classifier_probs_by_disease(raw_probs, label_names):
+    raw_probs = np.atleast_1d(raw_probs)
+    label_scores = {
+        label: float(raw_probs[idx])
+        for idx, label in enumerate(label_names[:len(raw_probs)])
+    }
+
+    disease_scores = {}
+    for disease in DISEASES:
+        aliases = CLASSIFIER_LABEL_ALIASES.get(disease, [disease])
+        alias_scores = [label_scores[label] for label in aliases if label in label_scores]
+        disease_scores[disease] = max(alias_scores) if alias_scores else 0.0
+    return disease_scores
+
+def _threshold_for_disease(disease):
+    aliases = CLASSIFIER_LABEL_ALIASES.get(disease, [disease])
+    for label in aliases:
+        if label in LEARNED_THRESHOLDS:
+            return LEARNED_THRESHOLDS[label]
+    if disease == "Fracture":
+        return 0.50
+    if disease == "Nodule":
+        return 0.45
+    return 0.40
+
 # -------------------------------
 # GLOBAL INITIALIZATION
 # -------------------------------
@@ -146,16 +221,18 @@ except Exception as e:
 
 # 2. Load Trained Classifier Head
 classifier = BioMedCLIPClassifierHead(num_classes=len(DISEASES)).to(device)
+classifier.label_names = DISEASES
 if os.path.exists(TRAINED_HEAD_PATH):
     try:
         state_dict = torch.load(TRAINED_HEAD_PATH, map_location=device)
+        classifier = build_classifier_for_state_dict(state_dict)
         classifier.load_state_dict(state_dict)
-        classifier.eval()
         print(f"✅ Loaded Trained Classifier from {TRAINED_HEAD_PATH}")
     except Exception as e:
         print(f"⚠️ Error loading classifier weights: {e}")
 else:
     print(f"⚠️ Classifier weights not found at {TRAINED_HEAD_PATH}")
+classifier.eval()
 
 def reload_classifier_head():
     """Hot-reload classifier weights from disk after HIL fine-tuning."""
@@ -163,6 +240,7 @@ def reload_classifier_head():
     if os.path.exists(TRAINED_HEAD_PATH):
         try:
             state_dict = torch.load(TRAINED_HEAD_PATH, map_location=device)
+            classifier = build_classifier_for_state_dict(state_dict)
             classifier.load_state_dict(state_dict)
             classifier.eval()
             print(f"🔄 Hot-reloaded classifier from {TRAINED_HEAD_PATH}")
@@ -226,7 +304,8 @@ def get_hybrid_findings(img_embedding):
     with torch.no_grad():
         logits = classifier(img_embedding)
         trained_probs = torch.sigmoid(logits).squeeze().cpu().numpy()
-        trained_map = {d: p for d, p in zip(DISEASES, trained_probs)}
+        label_names = getattr(classifier, "label_names", _labels_for_output_count(np.atleast_1d(trained_probs).shape[0]))
+        trained_map = _classifier_probs_by_disease(trained_probs, label_names)
 
     # B. Get Zero-Shot Probs & Combine
     for disease, text_embeds in disease_text_features.items():
@@ -241,12 +320,7 @@ def get_hybrid_findings(img_embedding):
         hybrid_score = (zs_prob * 0.5) + (tr_prob * 0.5)
         
         # 4. Use learned thresholds (with fallbacks)
-        if LEARNED_THRESHOLDS:
-            threshold = LEARNED_THRESHOLDS.get(disease, 0.40)
-        else:
-            threshold = 0.40
-            if disease == "Fracture": threshold = 0.50
-            if disease == "Nodule": threshold = 0.45
+        threshold = _threshold_for_disease(disease)
         
         findings[disease] = hybrid_score if hybrid_score > threshold else 0.0
         
@@ -305,7 +379,13 @@ class VisualDescriptionAgent:
     def __init__(self, model_name="MedAIBase/MedGemma1.5:4b"): 
         if model_name.startswith("ollama/"):
             model_name = model_name.split("/", 1)[1]
-        self.llm = ChatOllama(model=model_name, temperature=config.TEMPERATURE, num_ctx=config.CONTEXT_WINDOW)
+        self.llm = ChatOllama(
+            model=model_name,
+            temperature=config.TEMPERATURE,
+            num_ctx=REPORT_CONTEXT_WINDOW,
+            num_predict=160,
+            timeout=LLM_TIMEOUT_SECONDS,
+        )
 
     def generate_description(self, findings_dict):
         # Sort by confidence

@@ -27,6 +27,7 @@ interface PatientContextType {
 }
 
 const PatientContext = createContext<PatientContextType | undefined>(undefined);
+const LAST_PATIENT_STORAGE_KEY = "xmedfusion:last-patient-id";
 
 export const PatientProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
@@ -34,6 +35,15 @@ export const PatientProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const [loading, setLoading] = useState(true);
     const [pendingUploadFiles, setPendingUploadFiles] = useState<File[] | null>(null);
     const [pendingScanType, setPendingScanType] = useState<string>('auto');
+
+    const selectPatient = (patient: Patient | null) => {
+        setSelectedPatient(patient);
+        if (patient) {
+            localStorage.setItem(LAST_PATIENT_STORAGE_KEY, patient.id);
+        } else {
+            localStorage.removeItem(LAST_PATIENT_STORAGE_KEY);
+        }
+    };
 
     const fetchPatients = async () => {
         try {
@@ -62,10 +72,16 @@ export const PatientProvider: React.FC<{ children: React.ReactNode }> = ({ child
             if (selectedPatient) {
                 const stillExists = data?.find(p => p.id === selectedPatient.id);
                 if (!stillExists) {
-                    setSelectedPatient(null);
+                    selectPatient(null);
                 } else {
                     // Update selected patient data in case it changed
-                    setSelectedPatient(stillExists);
+                    selectPatient(stillExists);
+                }
+            } else {
+                const lastPatientId = localStorage.getItem(LAST_PATIENT_STORAGE_KEY);
+                const lastPatient = data?.find(p => p.id === lastPatientId);
+                if (lastPatient) {
+                    setSelectedPatient(lastPatient);
                 }
             }
         } catch (err) {
@@ -84,7 +100,7 @@ export const PatientProvider: React.FC<{ children: React.ReactNode }> = ({ child
                 fetchPatients();
             } else {
                 setPatients([]);
-                setSelectedPatient(null);
+                selectPatient(null);
             }
         });
 
@@ -97,7 +113,7 @@ export const PatientProvider: React.FC<{ children: React.ReactNode }> = ({ child
         <PatientContext.Provider
             value={{
                 selectedPatient,
-                setSelectedPatient,
+                setSelectedPatient: selectPatient,
                 patients,
                 loading,
                 refreshPatients: fetchPatients,

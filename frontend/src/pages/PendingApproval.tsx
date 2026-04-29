@@ -4,6 +4,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Activity, Clock, LogOut, ShieldOff, RefreshCw } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
+import { RadiologyImageCard } from "@/components/RadiologyImageCard";
+import { radiologyImages } from "@/assets/radiology";
 
 const PendingApproval = () => {
   const { isRejected, isApproved, isAdmin, session, signOut, refreshRole } = useAuth();
@@ -34,21 +36,12 @@ const PendingApproval = () => {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center relative overflow-hidden bg-background py-12 px-4">
-      {/* Background Orbs */}
-      <div className="absolute inset-0 overflow-hidden -z-10">
-        <div className="absolute top-1/4 -left-20 w-72 h-72 bg-primary/10 rounded-full blur-3xl animate-pulse-slow" />
-        <div
-          className="absolute bottom-1/4 -right-20 w-96 h-96 bg-medical-blue/10 rounded-full blur-3xl animate-pulse-slow"
-          style={{ animationDelay: "2s" }}
-        />
-      </div>
-
-      <div className="w-full max-w-md space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-700">
+    <div className="clinical-shell relative flex min-h-screen w-full items-center justify-center overflow-hidden px-4 py-12 sm:px-8 lg:px-14">
+      <div className="w-full max-w-2xl space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-700">
         {/* Logo */}
         <div className="text-center">
           <div className="inline-flex items-center gap-2 mb-6">
-            <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center text-primary-foreground shadow-glow">
+            <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-glow">
               <Activity className="w-6 h-6" />
             </div>
             <span className="text-2xl font-bold tracking-tight text-foreground">
@@ -57,11 +50,19 @@ const PendingApproval = () => {
           </div>
         </div>
 
-        <Card className="glass-card border-border/50 shadow-2xl">
+        <Card className="clinical-panel shadow-clinical">
           <CardContent className="pt-8 pb-8">
+            <RadiologyImageCard
+              src={radiologyImages.digitalConsult}
+              alt="Clinical verification workflow"
+              label="Secure review"
+              caption="Credential approval required"
+              className="mb-6 h-40"
+              scanLine={false}
+            />
             {isRejected ? (
               <div className="text-center space-y-4">
-                <div className="w-16 h-16 rounded-full bg-destructive/20 flex items-center justify-center mx-auto">
+                <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-destructive/15">
                   <ShieldOff className="w-8 h-8 text-destructive" />
                 </div>
                 <h2 className="text-2xl font-bold text-foreground">
@@ -75,8 +76,12 @@ const PendingApproval = () => {
               </div>
             ) : (
               <div className="text-center space-y-4">
-                <div className="w-16 h-16 rounded-full bg-amber-500/20 flex items-center justify-center mx-auto">
+                <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-amber-500/15">
                   <Clock className="w-8 h-8 text-amber-500 animate-pulse" />
+                </div>
+                <div className="mx-auto flex max-w-xs items-center justify-center gap-2 rounded-full border border-amber-500/20 bg-amber-500/10 px-3 py-1 text-xs font-semibold text-amber-600 dark:text-amber-400">
+                  <span className="h-2 w-2 rounded-full bg-amber-500" />
+                  Credential review in progress
                 </div>
                 <h2 className="text-2xl font-bold text-foreground">
                   Awaiting Approval
@@ -85,7 +90,7 @@ const PendingApproval = () => {
                   Your registration is under review. A platform administrator
                   will verify your credentials and approve your account shortly.
                 </p>
-                <div className="pt-2 px-4 py-3 rounded-lg bg-amber-500/10 border border-amber-500/20">
+                <div className="rounded-[20px] border border-amber-500/20 bg-amber-500/10 px-4 py-3 pt-2">
                   <p className="text-xs text-amber-600 dark:text-amber-400">
                     You will be able to access the platform once your account is
                     approved. Please check back later.

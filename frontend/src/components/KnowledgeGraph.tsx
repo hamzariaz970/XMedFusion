@@ -205,7 +205,7 @@ const KnowledgeGraph = ({ data }: KnowledgeGraphProps) => {
         {/* LEFT SIDEBAR (3 Cols) */}
         <div className="lg:col-span-3 space-y-4">
           {/* 1. Search */}
-          <Card>
+          <Card className="surface-card">
             <CardHeader className="pb-3"><CardTitle className="text-sm">Search Nodes</CardTitle></CardHeader>
             <CardContent>
               <div className="relative">
@@ -216,7 +216,7 @@ const KnowledgeGraph = ({ data }: KnowledgeGraphProps) => {
           </Card>
 
           {/* 2. Node Types Legend */}
-          <Card>
+          <Card className="surface-card">
             <CardHeader className="pb-3"><CardTitle className="text-sm">Node Legend</CardTitle></CardHeader>
             <CardContent className="space-y-2">
               {Object.entries(nodeTypeColors).map(([type, colors]) => (
@@ -229,7 +229,7 @@ const KnowledgeGraph = ({ data }: KnowledgeGraphProps) => {
           </Card>
 
           {/* 3. Relation Types Legend */}
-          <Card>
+          <Card className="surface-card">
             <CardHeader className="pb-3"><CardTitle className="text-sm">Relation Types</CardTitle></CardHeader>
             <CardContent className="space-y-3">
               {RELATION_TYPES.map((rel) => (
@@ -245,7 +245,7 @@ const KnowledgeGraph = ({ data }: KnowledgeGraphProps) => {
           </Card>
 
           {/* 4. Controls */}
-          <Card>
+          <Card className="surface-card">
             <CardHeader className="pb-3"><CardTitle className="text-sm">View Controls</CardTitle></CardHeader>
             <CardContent className="flex gap-2">
               <Button variant="outline" size="sm" onClick={() => setZoom(z => Math.max(0.5, z - 0.1))}><ZoomOut className="w-4 h-4" /></Button>
@@ -255,7 +255,7 @@ const KnowledgeGraph = ({ data }: KnowledgeGraphProps) => {
           </Card>
 
           {selectedNodeId !== null && (
-            <Card className="border-primary/30 animate-in fade-in slide-in-from-bottom-2">
+            <Card className="surface-card border-primary/30 animate-in fade-in slide-in-from-bottom-2">
               <CardHeader className="pb-3">
                 <div className="flex items-center justify-between">
                   <CardTitle className="text-sm flex items-center gap-2">
@@ -283,15 +283,15 @@ const KnowledgeGraph = ({ data }: KnowledgeGraphProps) => {
         </div>
 
         {/* MAIN GRAPH (9 Cols) */}
-        <Card className="lg:col-span-9 overflow-hidden border-2 shadow-inner bg-slate-50/50 dark:bg-slate-950/50">
-          <CardHeader className="border-b px-4 py-3 bg-background/50 backdrop-blur-sm sticky top-0 z-10">
+        <Card className="surface-card overflow-hidden bg-white/80 shadow-inner lg:col-span-9 dark:bg-slate-950/50">
+          <CardHeader className="sticky top-0 z-10 border-b border-border/50 bg-secondary/40 px-4 py-3 backdrop-blur-sm">
             <div className="flex items-center justify-between">
               <CardTitle className="flex items-center gap-2 text-base"><Network className="w-5 h-5 text-primary" /> Visualization</CardTitle>
               <Badge variant="secondary" className="font-normal">{nodes.length} Nodes • {links.length} Links</Badge>
             </div>
           </CardHeader>
           <CardContent className="p-0 relative">
-            <div className="relative w-full h-[600px] overflow-hidden cursor-move bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] [background-size:16px_16px] dark:bg-[radial-gradient(#1f2937_1px,transparent_1px)]">
+            <div className="relative h-[600px] w-full cursor-move overflow-hidden bg-[linear-gradient(#dce4fb_1px,transparent_1px),linear-gradient(90deg,#dce4fb_1px,transparent_1px)] [background-size:18px_18px] dark:bg-[radial-gradient(#1f2937_1px,transparent_1px)]">
               <svg width="100%" height="100%" viewBox="0 0 800 600" style={{ transform: `scale(${zoom})`, transformOrigin: 'center', transition: 'transform 0.3s ease-out' }}>
                 {links.map((link, index) => {
                   const sourcePos = getNodePosition(link.source);
@@ -329,7 +329,7 @@ const KnowledgeGraph = ({ data }: KnowledgeGraphProps) => {
       {/* STATS BAR (Separate grid) */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 w-full">
         {[ { label: "Total Entities", value: nodes.length }, { label: "Anatomical Sites", value: nodes.filter(n => n.type === 'anatomy').length }, { label: "Observations", value: nodes.filter(n => n.type === 'finding' || n.type === 'diagnosis').length }, { label: "Connections", value: links.length } ].map((stat, index) => (
-          <Card key={index} className="bg-muted/10"><CardContent className="p-4 text-center"><div className="text-2xl font-bold text-primary">{stat.value}</div><div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{stat.label}</div></CardContent></Card>
+          <Card key={index} className="metric-card"><CardContent className="p-4 text-center"><div className="text-2xl font-bold text-primary">{stat.value}</div><div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{stat.label}</div></CardContent></Card>
         ))}
       </div>
     </div>

@@ -9,6 +9,7 @@ import time
 from pathlib import Path
 from typing import List, Tuple, Literal, Optional, Union, Dict
 from PIL import Image
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -22,12 +23,27 @@ import config
 TRAINED_HEAD_PATH = "model_weights/KG_Agent/biomed_clip/biomed_clip_head_best.pth"
 TRAINED_BACKBONE_PATH = "model_weights/KG_Agent/biomed_clip/biomed_clip_backbone_finetuned.pth"
 THRESHOLDS_PATH = "model_weights/KG_Agent/biomed_clip/thresholds.json"
+TEXT_CONTEXT_LENGTH = 256
 
 DISEASES = [
     "Cardiomegaly", "Pleural Effusion", "Edema", "Pneumothorax", 
     "Infiltrate", "Consolidation", "Lung Opacity", "Nodule", 
     "Atelectasis", "Fracture"
 ]
+
+LEGACY_CHEXPERT_LABELS = [
+    "Enlarged Cardiomediastinum", "Cardiomegaly", "Lung Opacity",
+    "Lung Lesion", "Edema", "Consolidation", "Pneumonia",
+    "Atelectasis", "Pneumothorax", "Pleural Effusion", "Pleural Other",
+    "Fracture", "Support Devices", "No Finding"
+]
+
+CLASSIFIER_LABEL_ALIASES = {
+    "Cardiomegaly": ["Cardiomegaly", "Enlarged Cardiomediastinum"],
+    "Pleural Effusion": ["Pleural Effusion", "Pleural Other"],
+    "Infiltrate": ["Infiltrate", "Pneumonia"],
+    "Nodule": ["Nodule", "Lung Lesion"],
+}
 
 PATHOLOGY_CONFIG = {
     "Cardiomegaly":     {"pos": "enlarged heart cardiomegaly", "neg": "normal heart size"},
@@ -64,6 +80,62 @@ class BioMedCLIPClassifierHead(nn.Module):
 
     def forward(self, features):
         return self.head(features) + self.residual(features)
+
+class LegacyBioMedCLIPClassifierHead(nn.Module):
+    """Older single-linear-layer head used by earlier saved checkpoints."""
+    def __init__(self, num_classes, input_dim=512):
+        super().__init__()
+        self.head = nn.Linear(input_dim, num_classes)
+
+    def forward(self, features):
+        return self.head(features)
+
+def _infer_classifier_output_count(state_dict):
+    for key in ("head.weight", "head.8.weight", "residual.weight"):
+        if key in state_dict:
+            return int(state_dict[key].shape[0])
+    return len(DISEASES)
+
+def _labels_for_output_count(output_count):
+    if output_count == len(DISEASES):
+        return DISEASES
+    if output_count == len(LEGACY_CHEXPERT_LABELS):
+        return LEGACY_CHEXPERT_LABELS
+    return [f"class_{idx}" for idx in range(output_count)]
+
+def build_classifier_for_state_dict(state_dict, device):
+    output_count = _infer_classifier_output_count(state_dict)
+    if "head.weight" in state_dict and "head.0.weight" not in state_dict:
+        head = LegacyBioMedCLIPClassifierHead(num_classes=output_count).to(device)
+    else:
+        head = BioMedCLIPClassifierHead(num_classes=output_count).to(device)
+    head.label_names = _labels_for_output_count(output_count)
+    return head
+
+def _classifier_probs_by_disease(raw_probs, label_names):
+    raw_probs = np.atleast_1d(raw_probs)
+    label_scores = {
+        label: float(raw_probs[idx])
+        for idx, label in enumerate(label_names[:len(raw_probs)])
+    }
+
+    disease_scores = {}
+    for disease in DISEASES:
+        aliases = CLASSIFIER_LABEL_ALIASES.get(disease, [disease])
+        alias_scores = [label_scores[label] for label in aliases if label in label_scores]
+        disease_scores[disease] = max(alias_scores) if alias_scores else 0.0
+    return disease_scores
+
+def _threshold_for_disease(disease):
+    aliases = CLASSIFIER_LABEL_ALIASES.get(disease, [disease])
+    for label in aliases:
+        if label in LEARNED_THRESHOLDS:
+            return LEARNED_THRESHOLDS[label]
+    if disease == "Fracture":
+        return 0.50
+    if disease == "Nodule":
+        return 0.45
+    return 0.40
 
 
 # Load learned thresholds (with hardcoded fallbacks)
@@ -109,9 +181,10 @@ def get_global_probs(image, model, classifier_head, preprocess, device):
         features = model.encode_image(img_tensor)
         features = F.normalize(features, dim=-1)
         logits = classifier_head(features)
-        probs = torch.sigmoid(logits).squeeze()
+        probs = torch.sigmoid(logits).squeeze().cpu().numpy()
         
-    return {disease: probs[idx].item() for idx, disease in enumerate(DISEASES)}
+    label_names = getattr(classifier_head, "label_names", _labels_for_output_count(np.atleast_1d(probs).shape[0]))
+    return _classifier_probs_by_disease(probs, label_names)
 
 def hybrid_classify_spatial(image_path, model, classifier_head, preprocess, tokenizer, device):
     try:
@@ -128,11 +201,11 @@ def hybrid_classify_spatial(image_path, model, classifier_head, preprocess, toke
     crops = get_spatial_crops(raw_img)
     disease_embeds = {}
     with torch.no_grad():
-        norm_tokens = tokenizer(["normal chest x-ray", "abnormal chest x-ray"], padding="max_length", truncation=True, max_length=77, return_tensors="pt")["input_ids"].to(device)
+        norm_tokens = tokenizer(["normal chest x-ray", "abnormal chest x-ray"], padding="max_length", truncation=True, max_length=TEXT_CONTEXT_LENGTH, return_tensors="pt")["input_ids"].to(device)
         norm_embeds = F.normalize(model.encode_text(norm_tokens), dim=-1)
 
         for d, cfg in PATHOLOGY_CONFIG.items():
-            tokens = tokenizer([f"chest x-ray showing {cfg['pos']}", f"chest x-ray showing {cfg['neg']}"], padding="max_length", truncation=True, max_length=77, return_tensors="pt")["input_ids"].to(device)
+            tokens = tokenizer([f"chest x-ray showing {cfg['pos']}", f"chest x-ray showing {cfg['neg']}"], padding="max_length", truncation=True, max_length=TEXT_CONTEXT_LENGTH, return_tensors="pt")["input_ids"].to(device)
             disease_embeds[d] = F.normalize(model.encode_text(tokens), dim=-1)
 
     # Scan Zones
@@ -176,7 +249,7 @@ def hybrid_classify_spatial(image_path, model, classifier_head, preprocess, toke
                 final_score = (zs_prob * 0.5) + (trained_prob * 0.5)
                 
                 # Use learned thresholds
-                threshold = LEARNED_THRESHOLDS.get(disease, 0.40)
+                threshold = _threshold_for_disease(disease)
 
                 if final_score > threshold:
                      zone_findings.append(disease)
@@ -278,8 +351,8 @@ def infer_kg(
     if classifier_head is None:
         if os.path.exists(TRAINED_HEAD_PATH):
             try:
-                classifier_head = BioMedCLIPClassifierHead(num_classes=len(DISEASES)).to(device)
                 state_dict = torch.load(TRAINED_HEAD_PATH, map_location=device)
+                classifier_head = build_classifier_for_state_dict(state_dict, device)
                 classifier_head.load_state_dict(state_dict)
                 classifier_head.eval()
             except Exception as e:
@@ -361,8 +434,8 @@ if __name__ == "__main__":
     classifier_head = None
     if os.path.exists(TRAINED_HEAD_PATH):
         try:
-            classifier_head = BioMedCLIPClassifierHead(num_classes=len(DISEASES)).to(device)
             state_dict = torch.load(TRAINED_HEAD_PATH, map_location=device)
+            classifier_head = build_classifier_for_state_dict(state_dict, device)
             classifier_head.load_state_dict(state_dict)
             classifier_head.eval()
             print("✅ Trained Head Loaded.")

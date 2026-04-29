@@ -1,18 +1,24 @@
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { Activity, Upload, Network, FileImage, Menu, X, Users, FileSearch, LogIn, LogOut, ShieldCheck, Brain } from "lucide-react";
+import { Activity, Upload, Network, FileImage, Menu, X, Users, FileSearch, LogIn, LogOut, ShieldCheck, Brain, Plus, Loader2, LayoutDashboard } from "lucide-react";
 import { useState, useEffect } from "react";
 import { cn } from "@/lib/utils";
 import { usePatientContext } from "@/context/PatientContext";
 import { useAuth } from "@/context/AuthContext";
 import { supabase } from "@/lib/supabaseClient";
+import { toast } from "sonner";
 
 const navItems = [
   { path: "/", label: "Home", icon: Activity, requiresAuth: false, requiresPatient: false },
+  { path: "/dashboard", label: "Dashboard", icon: LayoutDashboard, requiresAuth: true, requiresPatient: false },
+  { path: "/knowledge-graph", label: "Graph", icon: Network, requiresAuth: false, requiresPatient: false },
   { path: "/patients", label: "Patients", icon: Users, requiresAuth: true, requiresPatient: false },
   { path: "/upload", label: "Upload", icon: Upload, requiresAuth: true, requiresPatient: true },
   { path: "/explainability", label: "Explainability", icon: FileSearch, requiresAuth: true, requiresPatient: true },
+  { path: "/image-mapping", label: "Mapping", icon: FileImage, requiresAuth: true, requiresPatient: true },
 ];
+
+const AUTH_FEEDBACK_MS = 350;
 
 export const Navbar = () => {
   const location = useLocation();
@@ -21,6 +27,7 @@ export const Navbar = () => {
   const { session, isAdmin, isDoctor, user, signOut: authSignOut } = useAuth();
   const { selectedPatient, setSelectedPatient } = usePatientContext();
   const [hilTaskCount, setHilTaskCount] = useState(0);
+  const [signingOut, setSigningOut] = useState(false);
 
   useEffect(() => {
     if (!user || !isDoctor) return;
@@ -34,25 +41,36 @@ export const Navbar = () => {
   }, [user, isDoctor]);
 
   const handleSignOut = async () => {
-    setSelectedPatient(null);
-    await authSignOut();
-    navigate("/login");
+    setSigningOut(true);
+    toast.dismiss();
+    try {
+      setSelectedPatient(null);
+      await Promise.allSettled([
+        authSignOut(),
+        new Promise((resolve) => setTimeout(resolve, AUTH_FEEDBACK_MS)),
+      ]);
+    } finally {
+      navigate("/login", { replace: true });
+      setIsOpen(false);
+      toast.success("Signed out successfully.");
+      setSigningOut(false);
+    }
   };
 
   return (
-    <nav className="fixed top-0 left-0 right-0 z-50 bg-card/80 backdrop-blur-xl border-b border-border/50">
-      <div className="container mx-auto px-4">
-        <div className="flex items-center justify-between h-16">
+    <nav className="fixed top-0 left-0 right-0 z-50 bg-white/95 backdrop-blur-xl">
+      <div className="figma-container">
+        <div className="flex items-center justify-between h-20">
           <Link to="/" className="flex items-center gap-2 group">
-            <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center shadow-glow transition-transform group-hover:scale-105">
-              <Activity className="w-5 h-5 text-primary-foreground" />
+            <div className="relative w-10 h-10 rounded-xl bg-gradient-to-br from-sky-600 to-primary flex items-center justify-center shadow-sm transition-transform group-hover:scale-105">
+              <Plus className="w-6 h-6 stroke-[4] text-white" />
             </div>
-            <span className="text-xl font-bold text-foreground">
-              XMed<span className="text-primary">Fusion</span>
+            <span className="block text-2xl font-extrabold tracking-tight text-foreground">
+              XMedFusion
             </span>
           </Link>
 
-          <div className="hidden md:flex items-center gap-1">
+          <div className="hidden md:flex items-center gap-7">
             {navItems
               .filter(item => {
                 const passesAuth = !item.requiresAuth || session;
@@ -61,8 +79,14 @@ export const Navbar = () => {
               })
               .map((item) => (
                 <Link key={item.path} to={item.path}>
-                  <Button variant={location.pathname === item.path ? "default" : "ghost"} size="sm" className={cn("gap-2", location.pathname === item.path && "shadow-glow")}>
-                    <item.icon className="w-4 h-4" />
+                  <Button
+                    variant="link"
+                    size="sm"
+                    className={cn(
+                      "h-auto px-0 text-sm font-medium text-foreground/80 hover:text-primary",
+                      location.pathname === item.path && "text-primary underline",
+                    )}
+                  >
                     {item.label}
                   </Button>
                 </Link>
@@ -72,7 +96,7 @@ export const Navbar = () => {
           <div className="hidden md:flex items-center gap-2">
             {session && isAdmin && (
               <Link to="/admin">
-                <Button variant={location.pathname === "/admin" ? "default" : "ghost"} size="sm" className="gap-2">
+                <Button variant={location.pathname === "/admin" ? "default" : "ghost"} size="sm" className="gap-2 rounded-full">
                   <ShieldCheck className="w-4 h-4" />
                   Admin
                 </Button>
@@ -80,29 +104,36 @@ export const Navbar = () => {
             )}
             {session && isDoctor && hilTaskCount > 0 && (
               <Link to={`/patients`}>
-                <Button variant="ghost" size="sm" className="gap-2 relative">
+                <Button variant="ghost" size="sm" className="gap-2 relative rounded-full">
                   <Brain className="w-4 h-4" />
-                  HIL Tasks
+                  HIL
                   <span className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-primary text-primary-foreground text-xs flex items-center justify-center animate-pulse">{hilTaskCount}</span>
                 </Button>
               </Link>
             )}
             {session ? (
-              <Button variant="outline" size="sm" className="gap-2" onClick={handleSignOut}>
-                <LogOut className="w-4 h-4" />
-                Sign Out
+              <Button variant="outline" size="sm" className="gap-2 rounded-full" onClick={handleSignOut} disabled={signingOut}>
+                {signingOut ? <Loader2 className="w-4 h-4 animate-spin" /> : <LogOut className="w-4 h-4" />}
+                {signingOut ? "Signing out..." : "Sign Out"}
               </Button>
             ) : (
-              <Link to="/login">
-                <Button variant="outline" size="sm" className="gap-2">
-                  <LogIn className="w-4 h-4" />
+              <>
+                <Link to="/login">
+                  <Button variant="outline" size="sm" className="gap-2 rounded-full border-foreground/70 px-5 text-foreground hover:border-primary">
+                    <LogIn className="w-4 h-4" />
                   Sign In
-                </Button>
-              </Link>
+                  </Button>
+                </Link>
+                <Link to="/login">
+                  <Button size="sm" className="rounded-full px-6">
+                    Join As A Doctor
+                  </Button>
+                </Link>
+              </>
             )}
           </div>
 
-          <Button variant="ghost" size="icon" className="md:hidden" onClick={() => setIsOpen(!isOpen)}>
+          <Button variant="ghost" size="icon" className="md:hidden" onClick={() => setIsOpen(!isOpen)} aria-label="Toggle navigation">
             {isOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
           </Button>
         </div>
@@ -129,6 +160,28 @@ export const Navbar = () => {
                   <Button variant={location.pathname === "/admin" ? "default" : "ghost"} className="w-full justify-start gap-2">
                     <ShieldCheck className="w-4 h-4" />
                     Admin
+                  </Button>
+                </Link>
+              )}
+              {session && isDoctor && hilTaskCount > 0 && (
+                <Link to="/patients" onClick={() => setIsOpen(false)}>
+                  <Button variant="ghost" className="w-full justify-start gap-2">
+                    <Brain className="w-4 h-4" />
+                    HIL Tasks
+                    <span className="ml-auto rounded-full bg-primary px-2 py-0.5 text-xs text-primary-foreground">{hilTaskCount}</span>
+                  </Button>
+                </Link>
+              )}
+              {session ? (
+                <Button variant="outline" className="w-full justify-start gap-2" onClick={handleSignOut} disabled={signingOut}>
+                  {signingOut ? <Loader2 className="w-4 h-4 animate-spin" /> : <LogOut className="w-4 h-4" />}
+                  {signingOut ? "Signing out..." : "Sign Out"}
+                </Button>
+              ) : (
+                <Link to="/login" onClick={() => setIsOpen(false)}>
+                  <Button variant="outline" className="w-full justify-start gap-2">
+                    <LogIn className="w-4 h-4" />
+                    Sign In
                   </Button>
                 </Link>
               )}

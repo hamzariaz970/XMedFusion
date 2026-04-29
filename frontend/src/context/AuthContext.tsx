@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState, useCallback, ReactNode } from "react";
-import { supabase } from "@/lib/supabaseClient";
+import { clearSupabaseAuthStorage, supabase } from "@/lib/supabaseClient";
 import type { Session, User } from "@supabase/supabase-js";
 
 // ---------- Types ----------
@@ -25,6 +25,21 @@ interface AuthContextValue {
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
+const AUTH_TIMEOUT_MS = 8000;
+const SIGN_OUT_TIMEOUT_MS = 1500;
+
+const withTimeout = async <T,>(promise: Promise<T>, fallback: T, timeoutMs = AUTH_TIMEOUT_MS): Promise<T> => {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<T>((resolve) => {
+    timeoutId = setTimeout(() => resolve(fallback), timeoutMs);
+  });
+
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
+};
 
 // ---------- Provider ----------
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
@@ -53,13 +68,24 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   }, [user, fetchRole]);
 
   useEffect(() => {
+    let mounted = true;
+
     // Initial session
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
+    withTimeout(supabase.auth.getSession(), { data: { session: null }, error: null }).then(async ({ data: { session } }) => {
+      if (!mounted) return;
       setSession(session);
       setUser(session?.user ?? null);
       if (session?.user) {
-        await fetchRole(session.user.id);
+        await withTimeout(fetchRole(session.user.id), undefined);
       }
+      if (!mounted) return;
+      setLoading(false);
+    }).catch((error) => {
+      console.warn("Auth session initialization warning:", error);
+      if (!mounted) return;
+      setSession(null);
+      setUser(null);
+      setUserRole(null);
       setLoading(false);
     });
 
@@ -76,14 +102,33 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       }
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
   }, [fetchRole]);
 
   const signOut = useCallback(async () => {
-    await supabase.auth.signOut();
     setSession(null);
     setUser(null);
     setUserRole(null);
+    clearSupabaseAuthStorage();
+
+    try {
+      const { error } = await withTimeout(
+        supabase.auth.signOut({ scope: "local" }),
+        { error: new Error("Sign-out cleanup timed out locally.") },
+        SIGN_OUT_TIMEOUT_MS
+      );
+      if (error) {
+        console.warn("Supabase sign-out warning:", error.message);
+      }
+    } finally {
+      setSession(null);
+      setUser(null);
+      setUserRole(null);
+      clearSupabaseAuthStorage();
+    }
   }, []);
 
   const isAdmin = userRole?.role === "admin" && userRole?.approval_status === "approved";
