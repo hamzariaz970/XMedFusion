@@ -1,10 +1,9 @@
-# train_filter.py
-
+import os
+os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, Dataset
-import os
 from PIL import Image
 from vision import vision_encoder 
 
@@ -62,8 +61,8 @@ class MultiClassFilterDataset(Dataset):
 def train_bouncer():
     # Update these paths to match your machine exactly
     XRAY_PATH = "data/iu_xray/images"
-    CT_PATH = "data/ctscan"
-    RANDOM_PATH = "data/test"
+    CT_PATH = "data/classify_ct"
+    RANDOM_PATH = "data/random"
     
     os.makedirs("model_weights", exist_ok=True)
     dataset = MultiClassFilterDataset(XRAY_PATH, CT_PATH, RANDOM_PATH, num_samples=200)

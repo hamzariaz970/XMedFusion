@@ -1,4 +1,6 @@
 # app.py
+import os
+os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
 
 from fastapi import FastAPI, UploadFile, File, Form, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
