@@ -22,6 +22,10 @@ import config
 
 REPORT_CONTEXT_WINDOW = min(config.CONTEXT_WINDOW, 8192)
 LLM_TIMEOUT_SECONDS = 180
+PRIMARY_VIEW_WEIGHT = 0.7
+FUSED_PRIOR_WEIGHT = 0.5
+PER_VIEW_MEAN_WEIGHT = 0.3
+PER_VIEW_MAX_WEIGHT = 0.2
 
 # Suppress warnings
 warnings.filterwarnings("ignore")
@@ -207,6 +211,51 @@ def _threshold_for_disease(disease):
         return 0.45
     return 0.40
 
+def _view_priority(name: str) -> int:
+    lower_name = name.lower()
+    if any(token in lower_name for token in ("frontal", "_pa", "_ap", "-pa", "-ap")):
+        return 0
+    stem = os.path.splitext(os.path.basename(lower_name))[0]
+    if stem == "0":
+        return 1
+    if any(token in lower_name for token in ("lateral", "_lat", "-lat")):
+        return 3
+    return 2
+
+def _select_primary_view_index(view_names):
+    if not view_names:
+        return 0
+    priorities = [_view_priority(name) for name in view_names]
+    return int(min(range(len(view_names)), key=lambda idx: priorities[idx]))
+
+def _compute_view_weights(num_views, primary_index):
+    if num_views == 1:
+        return np.array([1.0], dtype=np.float32)
+
+    aux_weight = max(0.0, 1.0 - PRIMARY_VIEW_WEIGHT)
+    weights = np.full(num_views, aux_weight / max(1, num_views - 1), dtype=np.float32)
+    weights[primary_index] = PRIMARY_VIEW_WEIGHT
+    return weights
+
+def encode_image_views(images, view_names=None):
+    if not images:
+        raise ValueError("At least one image is required.")
+
+    primary_index = _select_primary_view_index(view_names or [f"view_{idx}" for idx in range(len(images))])
+    weights = _compute_view_weights(len(images), primary_index)
+    embeddings = [vision_encoder.encode_image(image) for image in images]
+    stacked = torch.cat(embeddings, dim=0)
+    weight_tensor = torch.tensor(weights, dtype=stacked.dtype, device=stacked.device).unsqueeze(1)
+    fused_embedding = F.normalize((stacked * weight_tensor).sum(dim=0, keepdim=True), dim=-1)
+    return stacked, fused_embedding, weights, primary_index
+
+def _classifier_map_from_embedding(img_embedding):
+    with torch.no_grad():
+        logits = classifier(img_embedding)
+        trained_probs = torch.sigmoid(logits).squeeze().cpu().numpy()
+        label_names = getattr(classifier, "label_names", _labels_for_output_count(np.atleast_1d(trained_probs).shape[0]))
+    return _classifier_probs_by_disease(trained_probs, label_names)
+
 # -------------------------------
 # GLOBAL INITIALIZATION
 # -------------------------------
@@ -301,11 +350,7 @@ def get_hybrid_findings(img_embedding):
     findings = {}
     
     # A. Get Trained Head Probs
-    with torch.no_grad():
-        logits = classifier(img_embedding)
-        trained_probs = torch.sigmoid(logits).squeeze().cpu().numpy()
-        label_names = getattr(classifier, "label_names", _labels_for_output_count(np.atleast_1d(trained_probs).shape[0]))
-        trained_map = _classifier_probs_by_disease(trained_probs, label_names)
+    trained_map = _classifier_map_from_embedding(img_embedding)
 
     # B. Get Zero-Shot Probs & Combine
     for disease, text_embeds in disease_text_features.items():
@@ -325,6 +370,23 @@ def get_hybrid_findings(img_embedding):
         findings[disease] = hybrid_score if hybrid_score > threshold else 0.0
         
     return findings
+
+def get_multiview_hybrid_findings(images, view_names=None):
+    view_embeddings, fused_embedding, weights, _ = encode_image_views(images, view_names=view_names)
+    fused_findings = get_hybrid_findings(fused_embedding)
+    per_view_findings = [get_hybrid_findings(view_embeddings[idx:idx + 1]) for idx in range(view_embeddings.shape[0])]
+
+    aggregated = {}
+    for disease in DISEASES:
+        weighted_mean = float(sum(weights[idx] * per_view_findings[idx].get(disease, 0.0) for idx in range(len(per_view_findings))))
+        support_max = float(max((findings.get(disease, 0.0) for findings in per_view_findings), default=0.0))
+        fused_score = fused_findings.get(disease, weighted_mean)
+        aggregated[disease] = (
+            (FUSED_PRIOR_WEIGHT * fused_score)
+            + (PER_VIEW_MEAN_WEIGHT * weighted_mean)
+            + (PER_VIEW_MAX_WEIGHT * support_max)
+        )
+    return aggregated
 
 # -------------------------------
 # Logic: Scan Validation (Zero-Shot)

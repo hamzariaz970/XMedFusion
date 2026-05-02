@@ -7,7 +7,7 @@ import sys
 import gc
 import time
 from pathlib import Path
-from typing import List, Tuple, Literal, Optional, Union, Dict
+from typing import List, Tuple, Literal, Optional, Union, Dict, Sequence
 from PIL import Image
 import numpy as np
 import torch
@@ -24,6 +24,10 @@ TRAINED_HEAD_PATH = "model_weights/KG_Agent/biomed_clip/biomed_clip_head_best.pt
 TRAINED_BACKBONE_PATH = "model_weights/KG_Agent/biomed_clip/biomed_clip_backbone_finetuned.pth"
 THRESHOLDS_PATH = "model_weights/KG_Agent/biomed_clip/thresholds.json"
 TEXT_CONTEXT_LENGTH = 256
+PRIMARY_VIEW_WEIGHT = 0.7
+FUSED_PRIOR_WEIGHT = 0.5
+PER_VIEW_MEAN_WEIGHT = 0.3
+PER_VIEW_MAX_WEIGHT = 0.2
 
 DISEASES = [
     "Cardiomegaly", "Pleural Effusion", "Edema", "Pneumothorax", 
@@ -156,15 +160,104 @@ def load_thresholds():
     }
 
 LEARNED_THRESHOLDS = load_thresholds()
+ZERO_SHOT_TEXT_CACHE: Dict[Tuple[int, int, str], Tuple[torch.Tensor, Dict[str, torch.Tensor]]] = {}
 
 # -------------------------
 # 2. HELPER FUNCTIONS
 # -------------------------
+def _normalize_image_inputs(image: Union[str, Path, Sequence[Union[str, Path]]]) -> List[Path]:
+    if isinstance(image, (str, Path)):
+        image_paths = [image]
+    else:
+        image_paths = list(image)
+
+    normalized = [Path(path).expanduser() for path in image_paths]
+    if not normalized:
+        raise ValueError("At least one image path is required.")
+    for path in normalized:
+        if not path.exists():
+            raise FileNotFoundError(f"Image not found: {path}")
+    return normalized
+
+def _view_priority(path: Path) -> int:
+    lower_name = path.name.lower()
+    if any(token in lower_name for token in ("frontal", "_pa", "_ap", "-pa", "-ap")):
+        return 0
+    if path.stem == "0":
+        return 1
+    if any(token in lower_name for token in ("lateral", "_lat", "-lat")):
+        return 3
+    return 2
+
+def _select_primary_view_index(image_paths: Sequence[Path]) -> int:
+    priorities = [_view_priority(path) for path in image_paths]
+    return int(min(range(len(image_paths)), key=lambda idx: priorities[idx]))
+
+def _compute_view_weights(num_views: int, primary_index: int) -> np.ndarray:
+    if num_views == 1:
+        return np.array([1.0], dtype=np.float32)
+
+    aux_weight = max(0.0, 1.0 - PRIMARY_VIEW_WEIGHT)
+    weights = np.full(num_views, aux_weight / max(1, num_views - 1), dtype=np.float32)
+    weights[primary_index] = PRIMARY_VIEW_WEIGHT
+    return weights
+
+def _encode_image_views(images: Sequence[Image.Image], model, preprocess, device, primary_index: int):
+    weights = _compute_view_weights(len(images), primary_index)
+    embeddings = []
+
+    with torch.no_grad():
+        for image in images:
+            img_tensor = preprocess(image).unsqueeze(0).to(device)
+            features = model.encode_image(img_tensor)
+            embeddings.append(F.normalize(features, dim=-1))
+
+    stacked = torch.cat(embeddings, dim=0)
+    weight_tensor = torch.tensor(weights, dtype=stacked.dtype, device=stacked.device).unsqueeze(1)
+    fused_embedding = F.normalize((stacked * weight_tensor).sum(dim=0, keepdim=True), dim=-1)
+    return stacked, fused_embedding, weights
+
+def _get_zero_shot_embeddings(model, tokenizer, device):
+    cache_key = (id(model), id(tokenizer), str(device))
+    cached = ZERO_SHOT_TEXT_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+
+    disease_embeds = {}
+    with torch.no_grad():
+        norm_tokens = tokenizer(
+            ["normal chest x-ray", "abnormal chest x-ray"],
+            padding="max_length",
+            truncation=True,
+            max_length=TEXT_CONTEXT_LENGTH,
+            return_tensors="pt",
+        )["input_ids"].to(device)
+        norm_embeds = F.normalize(model.encode_text(norm_tokens), dim=-1)
+
+        for disease, cfg in PATHOLOGY_CONFIG.items():
+            tokens = tokenizer(
+                [f"chest x-ray showing {cfg['pos']}", f"chest x-ray showing {cfg['neg']}"],
+                padding="max_length",
+                truncation=True,
+                max_length=TEXT_CONTEXT_LENGTH,
+                return_tensors="pt",
+            )["input_ids"].to(device)
+            disease_embeds[disease] = F.normalize(model.encode_text(tokens), dim=-1)
+
+    ZERO_SHOT_TEXT_CACHE[cache_key] = (norm_embeds, disease_embeds)
+    return norm_embeds, disease_embeds
+
 def get_spatial_crops(image: Image.Image) -> Dict[str, Image.Image]:
     """
     FIX: Adjusted Left Lung crop start from 0.55 -> 0.62 to exclude heart shadow.
     """
     w, h = image.size
+    # Legacy single-view crop layout kept for reference:
+    # return {
+    #     "Right Lung": image.crop((0, 0, int(w * 0.45), h)),
+    #     "Mediastinum": image.crop((int(w * 0.30), 0, int(w * 0.70), h)),
+    #     "Left Lung": image.crop((int(w * 0.55), 0, w, h)),
+    # }
     return {
         "Right Lung": image.crop((0, 0, int(w * 0.45), h)),
         "Mediastinum": image.crop((int(w * 0.30), 0, int(w * 0.70), h)),
@@ -172,41 +265,63 @@ def get_spatial_crops(image: Image.Image) -> Dict[str, Image.Image]:
         "Left Lung": image.crop((int(w * 0.62), 0, w, h)) 
     }
 
-def get_global_probs(image, model, classifier_head, preprocess, device):
+def get_global_probs_from_embedding(features, classifier_head):
     if classifier_head is None:
         return {}
-        
-    img_tensor = preprocess(image).unsqueeze(0).to(device)
+
     with torch.no_grad():
-        features = model.encode_image(img_tensor)
-        features = F.normalize(features, dim=-1)
         logits = classifier_head(features)
         probs = torch.sigmoid(logits).squeeze().cpu().numpy()
-        
+
     label_names = getattr(classifier_head, "label_names", _labels_for_output_count(np.atleast_1d(probs).shape[0]))
     return _classifier_probs_by_disease(probs, label_names)
 
-def hybrid_classify_spatial(image_path, model, classifier_head, preprocess, tokenizer, device):
+def get_global_probs(image, model, classifier_head, preprocess, device):
+    if classifier_head is None:
+        return {}
+
+    _, fused_embedding, _ = _encode_image_views([image], model, preprocess, device, primary_index=0)
+    return get_global_probs_from_embedding(fused_embedding, classifier_head)
+
+def get_multiview_global_probs(images, model, classifier_head, preprocess, device, primary_index):
+    if classifier_head is None:
+        return {}
+
+    view_embeddings, fused_embedding, weights = _encode_image_views(images, model, preprocess, device, primary_index)
+    fused_probs = get_global_probs_from_embedding(fused_embedding, classifier_head)
+    per_view_probs = [
+        get_global_probs_from_embedding(view_embeddings[idx:idx + 1], classifier_head)
+        for idx in range(view_embeddings.shape[0])
+    ]
+
+    aggregated = {}
+    for disease in DISEASES:
+        weighted_mean = float(sum(weights[idx] * per_view_probs[idx].get(disease, 0.0) for idx in range(len(per_view_probs))))
+        support_max = float(max((probs.get(disease, 0.0) for probs in per_view_probs), default=0.0))
+        fused_score = fused_probs.get(disease, weighted_mean)
+        aggregated[disease] = (
+            (FUSED_PRIOR_WEIGHT * fused_score)
+            + (PER_VIEW_MEAN_WEIGHT * weighted_mean)
+            + (PER_VIEW_MAX_WEIGHT * support_max)
+        )
+    return aggregated
+
+def hybrid_classify_spatial_multiview(image_paths, model, classifier_head, preprocess, tokenizer, device):
     try:
-        raw_img = Image.open(image_path).convert("RGB")
+        normalized_paths = _normalize_image_inputs(image_paths)
+        raw_images = [Image.open(path).convert("RGB") for path in normalized_paths]
     except Exception as e:
         return f"Error: {e}"
 
-    findings_list = []
-    
-    # Global Priors
-    global_probs = get_global_probs(raw_img, model, classifier_head, preprocess, device)
-    
-    # Zero-Shot Embeddings
-    crops = get_spatial_crops(raw_img)
-    disease_embeds = {}
-    with torch.no_grad():
-        norm_tokens = tokenizer(["normal chest x-ray", "abnormal chest x-ray"], padding="max_length", truncation=True, max_length=TEXT_CONTEXT_LENGTH, return_tensors="pt")["input_ids"].to(device)
-        norm_embeds = F.normalize(model.encode_text(norm_tokens), dim=-1)
+    primary_index = _select_primary_view_index(normalized_paths)
+    primary_image = raw_images[primary_index]
 
-        for d, cfg in PATHOLOGY_CONFIG.items():
-            tokens = tokenizer([f"chest x-ray showing {cfg['pos']}", f"chest x-ray showing {cfg['neg']}"], padding="max_length", truncation=True, max_length=TEXT_CONTEXT_LENGTH, return_tensors="pt")["input_ids"].to(device)
-            disease_embeds[d] = F.normalize(model.encode_text(tokens), dim=-1)
+    findings_list = []
+
+    global_probs = get_multiview_global_probs(raw_images, model, classifier_head, preprocess, device, primary_index)
+
+    crops = get_spatial_crops(primary_image)
+    norm_embeds, disease_embeds = _get_zero_shot_embeddings(model, tokenizer, device)
 
     # Scan Zones
     for zone_name, zone_img in crops.items():
@@ -279,6 +394,9 @@ def hybrid_classify_spatial(image_path, model, classifier_head, preprocess, toke
             
     return "; ".join(findings_list)
 
+def hybrid_classify_spatial(image_path, model, classifier_head, preprocess, tokenizer, device):
+    return hybrid_classify_spatial_multiview([image_path], model, classifier_head, preprocess, tokenizer, device)
+
 # -------------------------
 # 3. GRAPH BUILDER
 # -------------------------
@@ -313,7 +431,7 @@ def parse_findings_to_kg(findings_str: str) -> dict:
 # 4. MAIN INFERENCE
 # -------------------------
 def infer_kg(
-    image: Union[str, Path],
+    image: Union[str, Path, Sequence[Union[str, Path]]],
     projection: str = "Frontal",
     *,
     clip_model=None, 
@@ -326,8 +444,8 @@ def infer_kg(
 ) -> dict:
     
     if debug: print("[KG] infer_kg called...", flush=True)
-    image_path = Path(image).expanduser()
-    if not image_path.exists(): raise FileNotFoundError(f"Image not found: {image_path}")
+    image_paths = _normalize_image_inputs(image)
+    primary_index = _select_primary_view_index(image_paths)
     
     owns_models = False
 
@@ -376,8 +494,12 @@ def infer_kg(
     
     # 3. Extract Findings
     if debug: print("[KG] Scanning...", flush=True)
-    visual_findings = hybrid_classify_spatial(
-        image_path, clip_model, classifier_head, clip_prep, tokenizer, device
+    # Legacy single-view path kept for reference:
+    # visual_findings = hybrid_classify_spatial(
+    #     image_paths[primary_index], clip_model, classifier_head, clip_prep, tokenizer, device
+    # )
+    visual_findings = hybrid_classify_spatial_multiview(
+        image_paths, clip_model, classifier_head, clip_prep, tokenizer, device
     )
     if debug: print(f"[KG] Findings: {visual_findings}", flush=True)
 
@@ -450,17 +572,18 @@ if __name__ == "__main__":
         
         img_list = item.get("image_path", [])
         if not img_list: continue
-        img_rel_path = img_list[0] if isinstance(img_list, list) else img_list
-        full_img_path = os.path.join(IMG_ROOT, img_rel_path)
+        img_rel_paths = img_list if isinstance(img_list, list) else [img_list]
+        full_img_paths = [os.path.join(IMG_ROOT, rel_path) for rel_path in img_rel_paths if rel_path]
+        full_img_paths = [path for path in full_img_paths if os.path.exists(path)]
         
-        if not os.path.exists(full_img_path):
+        if not full_img_paths:
             continue
 
         print(f"\n📸 Processing {i+1}/30: {uid}")
         
         try:
             kg_result = infer_kg(
-                full_img_path, 
+                full_img_paths, 
                 clip_model=clip_model,
                 clip_prep=clip_prep,
                 tokenizer=tokenizer,

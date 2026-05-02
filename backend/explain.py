@@ -5,7 +5,10 @@ from PIL import Image, ImageDraw, ImageFont
 ZONES = {
     "right lung": {"x1_pct": 0.02, "y1_pct": 0.02, "x2_pct": 0.48, "y2_pct": 0.98, "color": (255, 99, 71, 220)},    # Red
     "mediastinum": {"x1_pct": 0.30, "y1_pct": 0.05, "x2_pct": 0.70, "y2_pct": 0.95, "color": (60, 179, 113, 220)}, # Green
-    "left lung": {"x1_pct": 0.52, "y1_pct": 0.02, "x2_pct": 0.98, "y2_pct": 0.98, "color": (30, 144, 255, 220)}     # Blue
+    "left lung": {"x1_pct": 0.52, "y1_pct": 0.02, "x2_pct": 0.98, "y2_pct": 0.98, "color": (30, 144, 255, 220)},     # Blue
+    "lungs": {"x1_pct": 0.02, "y1_pct": 0.02, "x2_pct": 0.98, "y2_pct": 0.98, "color": (255, 165, 0, 210)},
+    "pleural space": {"x1_pct": 0.02, "y1_pct": 0.60, "x2_pct": 0.98, "y2_pct": 0.98, "color": (138, 43, 226, 210)},
+    "bones": {"x1_pct": 0.02, "y1_pct": 0.02, "x2_pct": 0.98, "y2_pct": 0.98, "color": (220, 20, 60, 210)}
 }
 
 def parse_kg_for_visuals(kg_data):

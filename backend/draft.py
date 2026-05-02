@@ -6,6 +6,7 @@ import pickle
 import torch
 import re
 import warnings
+import numpy as np
 from pathlib import Path
 from PIL import Image
 from torch.nn.functional import cosine_similarity
@@ -13,6 +14,7 @@ from torch.nn.functional import cosine_similarity
 from langchain_community.chat_models import ChatOllama 
 
 import config
+from report_labels import DISEASES, label_audit_from_report
 
 REPORT_CONTEXT_WINDOW = min(config.CONTEXT_WINDOW, 8192)
 LLM_TIMEOUT_SECONDS = 180
@@ -27,6 +29,7 @@ annotation_path = r"data/iu_xray/annotation.json"
 image_base_dir = r"data/iu_xray/images"
 BASE = Path(__file__).resolve().parent
 cache_file = BASE / "data" / "cache" / "reports_dict.pkl"
+report_records_cache_file = BASE / "data" / "cache" / "report_records.pkl"
 cache_file.parent.mkdir(parents=True, exist_ok=True)
 
 
@@ -58,6 +61,36 @@ else:
             pickle.dump(reports_dict, f)
         print(f"✅ Built and cached reports_dict with {len(reports_dict)} entries")
 
+
+def _build_report_records():
+    if not os.path.exists(annotation_path):
+        return []
+    with open(annotation_path, "r", encoding="utf-8") as f:
+        annotations = json.load(f).get("train", [])
+
+    seen = set()
+    records = []
+    for item in annotations:
+        report_text = item.get("report", "")
+        if not report_text or report_text in seen:
+            continue
+        seen.add(report_text)
+        labels, _ = label_audit_from_report(report_text)
+        records.append({
+            "report": report_text,
+            "labels": labels.astype(np.float32),
+        })
+    return records
+
+
+if os.path.exists(report_records_cache_file):
+    with open(report_records_cache_file, "rb") as f:
+        report_records = pickle.load(f)
+else:
+    report_records = _build_report_records()
+    with open(report_records_cache_file, "wb") as f:
+        pickle.dump(report_records, f)
+
 # -------------------------------
 # Helper functions
 # -------------------------------
@@ -73,14 +106,53 @@ class RetrievalAgent:
     Retrieves top-k similar reports using a shared VisionEncoder (BioMedCLIP).
     The encoder provides encode_image() and encode_text() in the same embedding space.
     """
-    def __init__(self, vision_encoder, k=3):
+    def __init__(self, vision_encoder, k=3, label_weight=0.0):
         self.encoder = vision_encoder
         self.k = k
+        self.label_weight = float(label_weight)
+        self._report_records = report_records
+        self._report_texts = [record["report"] for record in self._report_records]
+        self._label_matrix = (
+            np.vstack([record["labels"] for record in self._report_records]).astype(np.float32)
+            if self._report_records else np.zeros((0, len(DISEASES)), dtype=np.float32)
+        )
+        self._text_features = None
         print(f"✅ Retrieval Agent initialized (BioMedCLIP). Top-k={self.k}")
 
-    def retrieve_top_k(self, image_paths, reports_dict):
-        all_reports = list(set(reports_dict.values()))
-        if not all_reports:
+    def _ensure_text_features(self):
+        if self._text_features is not None:
+            return self._text_features
+        if not self._report_texts:
+            return None
+        batch_size = 64
+        text_features_list = []
+        for i in range(0, len(self._report_texts), batch_size):
+            batch = self._report_texts[i:i + batch_size]
+            batch_feat = self.encoder.encode_text(batch)
+            text_features_list.append(batch_feat)
+        self._text_features = torch.cat(text_features_list, dim=0)
+        return self._text_features
+
+    @staticmethod
+    def _normalize_similarities(similarities: torch.Tensor) -> np.ndarray:
+        sims = similarities.detach().cpu().numpy().astype(np.float32)
+        return np.clip((sims + 1.0) * 0.5, 0.0, 1.0)
+
+    def _label_overlap_scores(self, query_label_scores):
+        if not query_label_scores or self._label_matrix.size == 0:
+            return None
+        weights = np.asarray(
+            [float(query_label_scores.get(disease, 0.0)) for disease in DISEASES],
+            dtype=np.float32,
+        )
+        weights = np.clip(weights, 0.0, 1.0)
+        if float(weights.sum()) <= 0.0:
+            return None
+        return (self._label_matrix * weights.reshape(1, -1)).sum(axis=1) / float(weights.sum())
+
+    def retrieve_top_k(self, image_paths, reports_dict, query_label_scores=None):
+        text_features = self._ensure_text_features()
+        if text_features is None or not self._report_texts:
             print("⚠️ No reports found in dictionary.")
             return []
 
@@ -95,30 +167,33 @@ class RetrievalAgent:
         avg_img_feat = torch.mean(torch.cat(img_feats, dim=0), dim=0, keepdim=True)
         avg_img_feat = torch.nn.functional.normalize(avg_img_feat, dim=-1)
 
-        # Encode all report texts using BioMedCLIP (256-token PubMedBERT tokenizer)
-        # Process in batches to avoid OOM on large report sets
-        BATCH_SIZE = 64
-        text_features_list = []
-        for i in range(0, len(all_reports), BATCH_SIZE):
-            batch = all_reports[i:i + BATCH_SIZE]
-            batch_feat = self.encoder.encode_text(batch)
-            text_features_list.append(batch_feat)
-        text_features = torch.cat(text_features_list, dim=0)
-
         # Compute cosine similarity
         sims = cosine_similarity(avg_img_feat, text_features)
+        sim_scores = self._normalize_similarities(sims)
+        overlap_scores = self._label_overlap_scores(query_label_scores)
+        if overlap_scores is not None and self.label_weight > 0.0:
+            blended_scores = (1.0 - self.label_weight) * sim_scores + self.label_weight * overlap_scores
+        else:
+            blended_scores = sim_scores
         
         # Determine actual k based on available reports
-        actual_k = min(self.k, len(all_reports))
+        actual_k = min(self.k, len(self._report_texts))
         if actual_k == 0:
             return []
-            
-        topk_idx = sims.topk(actual_k).indices.tolist()
-        top_reports = [all_reports[i] for i in topk_idx]
-        top_scores = [sims[i].item() for i in topk_idx]
 
-        for i, (rep, score) in enumerate(zip(top_reports, top_scores)):
-            print(f"[{i+1}] Score: {score:.4f}\n{rep}\n{'-'*50}")
+        topk_idx = np.argsort(-blended_scores)[:actual_k].tolist()
+        top_reports = [self._report_texts[i] for i in topk_idx]
+
+        for rank, idx in enumerate(topk_idx, start=1):
+            score = float(blended_scores[idx])
+            if overlap_scores is not None and self.label_weight > 0.0:
+                print(
+                    f"[{rank}] Score: {score:.4f} "
+                    f"(img={float(sim_scores[idx]):.4f}, label={float(overlap_scores[idx]):.4f})\n"
+                    f"{self._report_texts[idx]}\n{'-'*50}"
+                )
+            else:
+                print(f"[{rank}] Score: {score:.4f}\n{self._report_texts[idx]}\n{'-'*50}")
         return top_reports
 
 # -------------------------------
