@@ -118,6 +118,7 @@ const UploadXray = () => {
     setDragActive(e.type === "dragenter" || e.type === "dragover");
   }, []);
 
+
   const processFiles = useCallback(async (files: FileList | File[]) => {
     if (!selectedPatient) {
       alert("Please select a patient from the Patients dashboard first.");
@@ -202,14 +203,8 @@ const UploadXray = () => {
               finishedSuccessfully = true;
               const parsedReport = parseReportText(data.final_report);
               const persistedScanType = data.detected_modality || (scanType === "auto" ? "unknown" : scanType);
-              // Set analysis results to use the first image for the main report view card
-              setAnalysisResults(fileArray[0], newPreviews[0], parsedReport, data.knowledge_graph, data.heatmap);
-              setTempFiles([]);
-              setTempPreviews([]);
-              setProgress(100);
-              setCurrentStep('complete');
-
-              // Now save to Supabase
+              // Now save to Supabase BEFORE setting state
+              let insertedScanId: string | null = null;
               try {
                 // Get Auth User ID since RLS requires user_id
                 const { data: { user } } = await supabase.auth.getUser();
@@ -218,7 +213,6 @@ const UploadXray = () => {
                 const now = new Date().toISOString();
                 const fileExt = fileArray[0].name.split('.').pop() || 'png';
                 const baseFileName = `${selectedPatient.id}_${now}`.replace(/[:.]/g, '-');
-                const origFileName = `${baseFileName}.${fileExt}`;
                 const heatFileName = `${baseFileName}_heatmap.png`;
 
                 let original_image_url: string | null = null;
@@ -228,8 +222,8 @@ const UploadXray = () => {
                 const uploadedUrls: string[] = [];
                 for (let i = 0; i < fileArray.length; i++) {
                   const currentFile = fileArray[i];
-                  const fileExt = currentFile.name.split('.').pop() || 'png';
-                  const origFileName = `${baseFileName}_${i}.${fileExt}`;
+                  const currentFileExt = currentFile.name.split('.').pop() || 'png';
+                  const origFileName = `${baseFileName}_${i}.${currentFileExt}`;
 
                   const { data: origData, error: origErr } = await supabase.storage
                     .from('medical-images')
@@ -253,7 +247,6 @@ const UploadXray = () => {
 
                 // 2. Upload heatmap if we have one
                 if (data.heatmap) {
-                  // data.heatmap is base64 like: "data:image/png;base64,....."
                   const base64Data = data.heatmap.split('base64,')[1];
                   if (base64Data) {
                     const byteCharacters = atob(base64Data);
@@ -282,13 +275,11 @@ const UploadXray = () => {
                 }
 
                 // 3. Insert into medical_scans
-                // Default severity to 'moderate' for now, could be derived from labels if needed
                 let severity = 'moderate';
                 const lowerImpression = parsedReport.impression.toLowerCase();
                 const lowerFindings = parsedReport.findings.toLowerCase();
                 if (lowerImpression.includes('normal') || lowerFindings.includes('unremarkable')) severity = 'mild';
                 if (lowerImpression.includes('severe') || lowerImpression.includes('critical')) severity = 'severe';
-
 
                 const { data: insertedScan, error: insertErr } = await supabase.from('medical_scans').insert([{
                   patient_id: selectedPatient.id,
@@ -305,26 +296,32 @@ const UploadXray = () => {
                 }]).select('id').single();
 
                 if (insertErr) {
-                  console.error("Failed to save report to database:", insertErr);
-                  toast.error("Analysis completed, but saving the report failed.");
-                  return;
+                  throw new Error(`Failed to save report to database: ${insertErr.message}`);
                 }
 
                 if (insertedScan?.id) {
-                  setCurrentScanId(insertedScan.id);
+                  insertedScanId = insertedScan.id;
+                  await supabase
+                    .from('patients')
+                    .update({ updated_at: now })
+                    .eq('id', selectedPatient.id);
+                  await refreshPatients();
+                  toast.success("Report saved to patient history.");
                 }
-
-                await supabase
-                  .from('patients')
-                  .update({ updated_at: now })
-                  .eq('id', selectedPatient.id);
-
-                await refreshPatients();
-                toast.success("Report saved to patient history.");
               } catch (dbError) {
                 console.error("Database Save Error:", dbError);
                 toast.error(dbError instanceof Error ? dbError.message : "Analysis completed, but saving failed.");
               }
+
+              // Update UI with results
+              setAnalysisResults(fileArray[0], newPreviews[0], parsedReport, data.knowledge_graph, data.heatmap);
+              if (insertedScanId) {
+                setCurrentScanId(insertedScanId);
+              }
+              setTempFiles([]);
+              setTempPreviews([]);
+              setProgress(100);
+              setCurrentStep('complete');
             }
           } catch (e) {
             console.error("Error parsing stream line", e);
@@ -420,7 +417,13 @@ const UploadXray = () => {
       try {
         const img = new Image();
         img.src = displayUrl;
-        await new Promise((resolve) => { img.onload = resolve; });
+        await new Promise((resolve) => { 
+          img.onload = resolve; 
+          img.onerror = () => {
+            console.warn("Failed to load image for PDF");
+            resolve(null);
+          };
+        });
 
         const imgProps = doc.getImageProperties(img);
         const pdfImgWidth = 60; // mm

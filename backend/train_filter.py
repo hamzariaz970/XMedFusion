@@ -88,7 +88,7 @@ def train_bouncer():
         print(f"Epoch {epoch+1}/20 - Loss: {l_sum/len(loader):.4f}")
     
     # Save with a NEW NAME to avoid shape crashes with the old binary model
-    torch.save(model.state_dict(), "model_weights/medical_filter_head.pth")
+    torch.save(model.state_dict(), "model_weights/input_classifier/medical_filter_head.pth")
     print("✅ Multi-Class filter trained and saved!")
 
 if __name__ == "__main__":
