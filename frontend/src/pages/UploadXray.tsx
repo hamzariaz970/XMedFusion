@@ -99,9 +99,9 @@ const UploadXray = () => {
   const [scanType, setScanType] = useState<ScanType>('auto');
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  const displayFile = uploadedFile || tempFiles[0];
-  const displayUrl = previewUrl || tempPreviews[0];
-  const isCtStudyStaged = scanType === 'ct' && currentStep === 'idle' && tempFiles.length > 0 && !report;
+  const displayFile = uploadedFile || (tempFiles.length > 0 ? tempFiles[0] : null);
+  const displayUrl = previewUrl || (tempPreviews.length > 0 ? tempPreviews[0] : null);
+  const isStudyStaged = currentStep === 'idle' && tempFiles.length > 0 && !report;
 
   const parseReportText = (text: string | undefined): ExtendedParsedReport => {
     if (!text) {
@@ -426,6 +426,8 @@ const UploadXray = () => {
           data.detected_modality || null,
           data.explainability || null,
           data.reference_image || null,
+          insertedScanId,
+          newPreviews
         );
         if (insertedScanId) {
           setCurrentScanId(insertedScanId);
@@ -446,7 +448,7 @@ const UploadXray = () => {
     }
   }, [setAnalysisResults, setCurrentScanId, tempPreviews, scanType, selectedPatient, refreshPatients, user]);
 
-  const stageFilesForCt = useCallback((files: FileList | File[], requestedScanType?: ScanType, append = false) => {
+  const stageFiles = useCallback((files: FileList | File[], requestedScanType?: ScanType, append = false) => {
     if (!selectedPatient) {
       alert("Please select a patient from the Patients dashboard first.");
       return;
@@ -456,16 +458,15 @@ const UploadXray = () => {
     const incomingFiles = Array.from(files);
     if (!incomingFiles.length) return;
 
-    if (effectiveScanType !== "ct") {
-      processFiles(incomingFiles, effectiveScanType);
-      return;
-    }
-
     resetAnalysis();
 
     const mergedFiles = append ? [...tempFiles, ...incomingFiles] : incomingFiles;
-    if (mergedFiles.length > CT_MAX_UPLOAD_FILES) {
-      toast.error(`CT uploads are limited to ${CT_MAX_UPLOAD_FILES} slices per study.`);
+    
+    // Limits based on scan type
+    const maxFiles = effectiveScanType === 'ct' ? CT_MAX_UPLOAD_FILES : 5; // Allow up to 5 views for X-ray
+    
+    if (mergedFiles.length > maxFiles) {
+      toast.error(`${effectiveScanType === 'ct' ? 'CT' : 'X-ray'} uploads are limited to ${maxFiles} images.`);
       return;
     }
 
@@ -477,11 +478,11 @@ const UploadXray = () => {
     setCurrentStep('idle');
     setProgress(0);
     setActiveAgentIndex(0);
-  }, [processFiles, resetAnalysis, scanType, selectedPatient, tempFiles, tempPreviews]);
+  }, [resetAnalysis, scanType, selectedPatient, tempFiles, tempPreviews]);
 
   const handleQueuedFileSelection = useCallback((files: FileList | File[]) => {
-    stageFilesForCt(files, scanType, tempFiles.length > 0);
-  }, [scanType, stageFilesForCt, tempFiles.length]);
+    stageFiles(files, scanType, tempFiles.length > 0);
+  }, [scanType, stageFiles, tempFiles.length]);
 
   // AUTO-TRIGGER: When coming from Patient Dashboard via Upload Scan button
   useEffect(() => {
@@ -495,11 +496,7 @@ const UploadXray = () => {
       setPendingScanType('auto');
       // 3. CT studies should stage first; X-rays can still process immediately.
       setTimeout(() => {
-        if (requestedScanType === 'ct') {
-          stageFilesForCt(files, requestedScanType);
-        } else {
-          processFiles(files, requestedScanType);
-        }
+        stageFiles(files, requestedScanType);
       }, 50);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -671,7 +668,7 @@ const UploadXray = () => {
     <Layout>
       <section className="figma-page-shell">
         <div className="space-y-10">
-          <div className="figma-workspace-hero grid gap-6 lg:grid-cols-[1fr_390px] lg:items-center">
+          <div className="figma-workspace-hero flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <Badge variant="outline" className="eyebrow mb-4">
                 <Brain className="h-3.5 w-3.5" />
@@ -684,19 +681,10 @@ const UploadXray = () => {
                 Upload a scan, watch the agent pipeline progress, and review the generated report with evidence links.
               </p>
             </div>
-            <div className="relative">
-              <RadiologyImageCard
-                src={radiologyImages.laptopReview}
-                alt="Radiology report generation workstation"
-                label="Report synthesis"
-                caption="Upload, analyze, verify"
-                className="h-[280px]"
-              />
-              <div className="report-glass-panel absolute left-5 top-5 w-[calc(100%-2.5rem)]">
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Current patient</p>
-                <p className="mt-1 font-bold text-foreground">{selectedPatient ? selectedPatient.name : "No patient selected"}</p>
-                <p className="text-xs text-muted-foreground">{selectedPatient ? `${selectedPatient.age} years / ${selectedPatient.gender}` : "Select a patient before upload"}</p>
-              </div>
+            <div className="report-glass-panel w-full lg:w-[390px]">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Active patient context</p>
+              <p className="mt-1 font-bold text-foreground text-lg">{selectedPatient ? selectedPatient.name : "No patient selected"}</p>
+              <p className="text-sm text-muted-foreground">{selectedPatient ? `${selectedPatient.age} years / ${selectedPatient.gender}` : "Select a patient to unlock upload"}</p>
             </div>
           </div>
 
@@ -803,51 +791,129 @@ const UploadXray = () => {
                     </>
                   ) : (
                     <div>
-                      <div className="relative mb-4 aspect-square overflow-hidden rounded-[28px] bg-clinical-ink">
-                        <img src={displayUrl!} alt="Scan" className="w-full h-full object-contain" />
+                      <div className="relative mb-4 aspect-square overflow-hidden rounded-[28px] bg-clinical-ink border border-border/50 shadow-inner group">
+                        <img src={displayUrl!} alt="Scan" className="w-full h-full object-contain transition-transform duration-500 group-hover:scale-105" />
 
                         {currentStep === 'analyzing' && (
-                          <div className="absolute inset-0 bg-background/60 backdrop-blur-sm flex flex-col items-center justify-center text-center p-4">
-                            <Brain className="w-12 h-12 text-primary animate-pulse mb-4" />
+                          <div className="absolute inset-0 bg-background/60 backdrop-blur-sm flex flex-col items-center justify-center text-center p-4 z-10">
+                            <div className="relative mb-4">
+                              <Brain className="w-12 h-12 text-primary animate-pulse" />
+                              <div className="absolute -inset-2 bg-primary/20 rounded-full blur-xl animate-pulse" />
+                            </div>
                             <p className="text-lg font-bold">X-MedFusion Processing</p>
                             <p className="text-sm text-muted-foreground mt-1">Multi-Agent System Active</p>
                           </div>
                         )}
+
+                        {/* PREVIEW NAVIGATION (Before and After Analysis) */}
+                        {((tempPreviews.length > 1 && !report) || (useAnalysis().previewUrls.length > 1 && !!report)) && (
+                          <div className="absolute bottom-4 left-0 right-0 flex justify-center gap-1.5 px-4 overflow-x-auto pb-2 z-20">
+                             {(report ? useAnalysis().previewUrls : tempPreviews).map((p, idx) => {
+                               const isActive = report 
+                                 ? p === useAnalysis().previewUrl 
+                                 : p === displayUrl;
+                               return (
+                                 <div 
+                                   key={idx} 
+                                   className={cn(
+                                     "w-12 h-12 rounded-lg border-2 overflow-hidden cursor-pointer transition-all shrink-0 bg-black shadow-lg",
+                                     isActive ? "border-primary scale-110 shadow-glow ring-2 ring-primary/20" : "border-white/20 opacity-70 hover:opacity-100 hover:scale-105"
+                                   )}
+                                   onClick={(e) => {
+                                     e.stopPropagation();
+                                     if (report) {
+                                       // After analysis, we just update the main preview in context if needed
+                                       // Actually the context only has ONE previewUrl for the heatmap logic etc.
+                                       // For now, let's just let them swap the primary preview in the UI
+                                       // by updating the context's previewUrl.
+                                       const ctx = useAnalysis();
+                                       ctx.setAnalysisResults(
+                                         ctx.uploadedFile!,
+                                         p,
+                                         ctx.report!,
+                                         ctx.knowledgeGraphData,
+                                         ctx.heatmapData,
+                                         ctx.detectedModality,
+                                         ctx.explainabilityData,
+                                         ctx.referenceImageUrl,
+                                         ctx.currentScanId,
+                                         ctx.previewUrls
+                                       );
+                                     } else {
+                                       // Before analysis, swap order in temp state
+                                       const newFiles = [...tempFiles];
+                                       const newPreviews = [...tempPreviews];
+                                       const [f] = newFiles.splice(idx, 1);
+                                       const [url] = newPreviews.splice(idx, 1);
+                                       newFiles.unshift(f);
+                                       newPreviews.unshift(url);
+                                       setTempFiles(newFiles);
+                                       setTempPreviews(newPreviews);
+                                     }
+                                   }}
+                                 >
+                                   <img src={p} alt={`View ${idx+1}`} className="w-full h-full object-cover" />
+                                 </div>
+                               );
+                             })}
+                          </div>
+                        )}
                       </div>
-                      {isCtStudyStaged && (
-                        <div className="mb-4 rounded-[22px] border border-primary/20 bg-primary/5 p-4">
-                          <p className="text-sm font-semibold text-foreground">CT study staged for review</p>
-                          <p className="mt-1 text-xs text-muted-foreground">
-                            {tempFiles.length} slice{tempFiles.length === 1 ? "" : "s"} queued. Add more slices or start analysis when the study is ready.
-                          </p>
+                      
+                      {isStudyStaged && (
+                        <div className="mb-4 rounded-[22px] border border-primary/20 bg-primary/5 p-4 animate-in fade-in slide-in-from-top-2">
+                          <div className="flex items-center gap-3 mb-2">
+                            <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center">
+                              <Upload className="h-4 w-4 text-primary" />
+                            </div>
+                            <div>
+                              <p className="text-sm font-bold text-foreground">
+                                {scanType === 'ct' ? 'CT Study' : 'Multi-View X-Ray'} Staged
+                              </p>
+                              <p className="text-xs text-muted-foreground">
+                                {tempFiles.length} file{tempFiles.length === 1 ? "" : "s"} ready for analysis
+                              </p>
+                            </div>
+                          </div>
+                          
+                          <div className="flex gap-2">
+                             <Button variant="outline" size="sm" className="flex-1 h-9 rounded-xl" onClick={openFilePicker}>
+                                <Upload className="w-3.5 h-3.5 mr-2" />
+                                Add {scanType === 'ct' ? 'Slices' : 'Views'}
+                             </Button>
+                             <Button size="sm" className="flex-1 h-9 rounded-xl shadow-glow" onClick={() => processFiles(tempFiles, scanType)}>
+                                <Brain className="w-3.5 h-3.5 mr-2" />
+                                Start Analysis
+                             </Button>
+                          </div>
                         </div>
                       )}
-                      <div className="flex justify-between items-center text-sm">
-                        <span className="truncate max-w-[200px]">{displayFile.name}</span>
+
+                      <div className="flex justify-between items-center text-sm px-1">
+                        <div className="flex flex-col">
+                          <span className="truncate max-w-[150px] font-medium">{displayFile?.name}</span>
+                          <span className="text-[10px] text-muted-foreground uppercase tracking-tighter">Current Preview</span>
+                        </div>
+                        
                         <div className="flex gap-2">
-                          {tempFiles.length > 1 && (
-                            <span className="px-2 py-1 bg-muted rounded text-xs uppercase font-bold flex items-center">
-                              {tempFiles.length} files
-                            </span>
+                          {tempFiles.length > 0 && (
+                            <Badge variant="secondary" className="h-6 gap-1.5 px-2 bg-clinical-ink text-white border-none">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                              {tempFiles.length} {tempFiles.length === 1 ? 'FILE' : 'FILES'}
+                            </Badge>
                           )}
-                          <span className="px-2 py-1 bg-muted rounded text-xs uppercase font-bold flex items-center">
-                            Mode: {scanType}
-                          </span>
-                          {isCtStudyStaged && (
-                            <>
-                              <Button variant="outline" size="sm" onClick={openFilePicker}>
-                                <Upload className="w-3 h-3 mr-1" />
-                                Add slices
-                              </Button>
-                              <Button size="sm" onClick={() => processFiles(tempFiles, 'ct')}>
-                                <Brain className="w-3 h-3 mr-1" />
-                                Analyze CT Study
-                              </Button>
-                            </>
-                          )}
-                          <Button variant="ghost" size="sm" onClick={handleReset} disabled={currentStep === 'analyzing'}>
-                            <RefreshCw className={cn("w-3 h-3 mr-1", currentStep === 'analyzing' && "animate-spin")} />
-                            {currentStep === 'analyzing' ? 'Busy...' : 'Reset'}
+                          <Badge variant="outline" className="h-6 uppercase font-bold text-[10px]">
+                            {scanType}
+                          </Badge>
+                          
+                          <Button 
+                            variant="ghost" 
+                            size="icon" 
+                            className="h-6 w-6 rounded-full hover:bg-destructive/10 hover:text-destructive" 
+                            onClick={handleReset} 
+                            disabled={currentStep === 'analyzing'}
+                          >
+                            <RefreshCw className={cn("w-3 h-3", currentStep === 'analyzing' && "animate-spin")} />
                           </Button>
                         </div>
                       </div>
@@ -1002,15 +1068,12 @@ const UploadXray = () => {
                       </div>
                     </CardContent>
                   ) : (
-                    <div className="m-auto w-full p-6 text-center text-muted-foreground">
-                      <RadiologyImageCard
-                        src={radiologyImages.chestXrayReview}
-                        alt="Radiologist preparing report"
-                        label="Awaiting scan"
-                        caption="Report will appear here after analysis"
-                        className="mx-auto mb-6 h-64 max-w-md"
-                      />
-                      <p className="text-sm font-medium">Report will appear here after analysis.</p>
+                    <div className="m-auto w-full p-8 text-center text-muted-foreground flex flex-col items-center justify-center space-y-4">
+                      <div className="w-20 h-20 rounded-full bg-primary/5 flex items-center justify-center mb-2">
+                        <FileText className="w-10 h-10 text-primary/30" />
+                      </div>
+                      <h3 className="text-lg font-bold text-foreground">Awaiting Input Scan</h3>
+                      <p className="text-sm max-w-xs mx-auto">Upload a medical image on the left to begin the multi-agent diagnostic synthesis.</p>
                     </div>
                   )}
                 </Card>

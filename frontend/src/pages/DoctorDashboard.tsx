@@ -189,7 +189,7 @@ const DoctorDashboard = () => {
   return (
     <Layout>
       <div className="figma-page-shell space-y-8">
-        <section className="figma-workspace-hero grid gap-6 lg:grid-cols-[1.1fr_0.9fr] lg:items-center">
+        <section className="figma-workspace-hero">
           <div>
             <Badge variant="outline" className="eyebrow mb-4">
               <ShieldCheck className="h-3.5 w-3.5" />
@@ -199,7 +199,7 @@ const DoctorDashboard = () => {
               {getGreeting()}, <span className="text-primary">Dr. {doctorName}</span>
             </h1>
             <p className="mt-4 max-w-2xl text-muted-foreground">
-              Start with the highest-value clinical context: recent imaging, active cases, pending expert review, and the patient you were last working on.
+              Welcome back. Access your patient registry, start new diagnostic reports, and review active clinical evidence.
             </p>
             <div className="mt-8 flex flex-col gap-3 sm:flex-row">
               <Button className="gap-2 shadow-glow" onClick={() => openPatient(lastPatient, lastPatient ? "/upload" : "/patients")}>
@@ -212,22 +212,12 @@ const DoctorDashboard = () => {
               </Button>
             </div>
           </div>
-          <div className="grid gap-4">
-            <RadiologyImageCard
-              src={radiologyImages.neuroReview}
-              alt="Radiologist reviewing diagnostic imaging"
-              label="Morning worklist"
-              caption="Recent scans, pending reads, evidence review"
-              className="min-h-[300px]"
-            />
-          </div>
         </section>
 
-        <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
           <DashboardMetric icon={Users} label="Patient Panel" value={stats.totalPatients} detail={`${stats.activeCases} active cases`} />
           <DashboardMetric icon={FileText} label="Studies This Week" value={stats.studiesThisWeek} detail="Recent generated reports" />
           <DashboardMetric icon={AlertTriangle} label="Critical Cases" value={stats.criticalCases} detail="Need close follow-up" tone="destructive" />
-          <DashboardMetric icon={Brain} label="HIL Completion" value={`${stats.hilProgress}%`} detail={`${hilTasks.length} active tasks`} />
         </section>
 
         <section className="grid gap-6 xl:grid-cols-[0.8fr_1.2fr_0.8fr]">
@@ -347,49 +337,30 @@ const DoctorDashboard = () => {
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <ListChecks className="h-5 w-5 text-primary" />
-                  Today&apos;s Priorities
+                  Clinical Tools
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                <PriorityItem icon={AlertTriangle} label="Review critical patients" value={stats.criticalCases} active={stats.criticalCases > 0} />
-                <PriorityItem icon={Brain} label="Complete HIL feedback" value={hilTasks.length} active={hilTasks.length > 0} />
-                <PriorityItem icon={Network} label="Check evidence graph" value="Ready" />
-                <Button variant="outline" className="w-full justify-between" onClick={() => navigate("/knowledge-graph")}>
+                <PriorityItem icon={AlertTriangle} label="Critical patients" value={stats.criticalCases} active={stats.criticalCases > 0} />
+                <PriorityItem icon={Network} label="Evidence Graph" value="Active" />
+                <Button 
+                  variant="outline" 
+                  className="w-full justify-between" 
+                  onClick={() => navigate("/knowledge-graph")}
+                  disabled={!selectedPatient}
+                >
                   Open knowledge graph
                   <ArrowRight className="h-4 w-4" />
                 </Button>
-              </CardContent>
-            </Card>
-
-            <Card className="surface-card">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Brain className="h-5 w-5 text-primary" />
-                  Expert Feedback
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {hilTasks.length > 0 ? (
-                  hilTasks.map((task) => {
-                    const progress = task.total_scans ? Math.round((task.completed_scans / task.total_scans) * 100) : 0;
-                    return (
-                      <div key={task.id} className="rounded-[22px] border border-border/60 bg-white/70 p-4">
-                        <div className="flex items-center justify-between gap-3">
-                          <p className="font-semibold text-foreground">{task.title}</p>
-                          <span className="text-xs font-bold text-primary">{progress}%</span>
-                        </div>
-                        <Progress value={progress} className="mt-3 h-2" />
-                        <Button variant="link" className="mt-2 h-auto px-0 text-primary" onClick={() => navigate(`/hil/task/${task.id}`)}>
-                          Continue labeling
-                        </Button>
-                      </div>
-                    );
-                  })
-                ) : (
-                  <div className="rounded-[22px] border border-border/60 bg-white/70 p-4 text-sm text-muted-foreground">
-                    No assigned feedback tasks right now.
-                  </div>
-                )}
+                <Button 
+                  variant="outline" 
+                  className="w-full justify-between" 
+                  onClick={() => navigate("/explainability")}
+                  disabled={!selectedPatient}
+                >
+                  View explainability
+                  <ArrowRight className="h-4 w-4" />
+                </Button>
               </CardContent>
             </Card>
           </div>

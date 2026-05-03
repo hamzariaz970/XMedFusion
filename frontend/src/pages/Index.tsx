@@ -40,7 +40,7 @@ const services = [
     featured: true,
   },
   {
-    title: "Knowledge Mapping",
+    title: "Knowledge Discovery",
     copy: "Connect anatomy, observations, and diagnostic claims through a clinical graph.",
     icon: Network,
     image: radiologyImages.chestXrayReview,
@@ -79,13 +79,13 @@ const Index = () => {
               </p>
               <div className="mt-7 flex flex-col gap-3 sm:flex-row">
                 <Link to={session ? "/upload" : "/login"}>
-                  <Button variant="glass" size="lg" className="w-full rounded-full bg-white text-foreground hover:bg-white/90 sm:w-auto">
-                    Schedule Analysis
+                  <Button variant="glass" size="lg" className="w-full rounded-full bg-white text-foreground hover:bg-white/90 sm:w-auto px-8">
+                    Upload Scan
                   </Button>
                 </Link>
-                <Link to={session ? "/patients" : "/login"}>
-                  <Button size="lg" className="w-full rounded-full bg-primary text-white hover:bg-primary/90 sm:w-auto">
-                    Find Patient
+                <Link to={session ? "/dashboard" : "/login"}>
+                  <Button size="lg" className="w-full rounded-full bg-primary text-white hover:bg-primary/90 sm:w-auto px-8">
+                    Dashboard
                   </Button>
                 </Link>
               </div>
@@ -98,20 +98,14 @@ const Index = () => {
                 className="mt-8 h-60 md:hidden"
               />
 
-              <div className="mt-10 w-full max-w-[330px] rounded-[24px] bg-white p-3 text-foreground shadow-card transition-all duration-300 hover:-translate-y-1 hover:shadow-card-hover">
-                <div className="grid grid-cols-[64px_1fr_44px] items-center gap-3">
-                  <div className="h-14 overflow-hidden rounded-2xl bg-clinical-ink">
-                    <img src={radiologyImages.chestXrayReview} alt="Chest X-ray report review" className="h-full w-full object-cover" />
+              <div className="mt-10 w-full max-w-[340px] rounded-[24px] bg-white/10 border border-white/20 p-5 text-white shadow-glow backdrop-blur-md">
+                <div className="flex items-center gap-4">
+                  <div className="h-12 w-12 rounded-2xl bg-white/20 flex items-center justify-center">
+                    <ShieldCheck className="h-6 w-6" />
                   </div>
                   <div>
-                    <p className="text-sm font-bold">Chest Radiology</p>
-                    <p className="mt-1 text-xs text-muted-foreground">12pm - 6pm</p>
-                    <span className="mt-2 inline-flex rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-bold text-primary">
-                      Mon - Fri
-                    </span>
-                  </div>
-                  <div className="flex h-16 items-center justify-center rounded-xl bg-primary text-xs font-semibold text-white [writing-mode:vertical-rl]">
-                    Review
+                    <p className="text-sm font-bold">Clinical Evidence Layer</p>
+                    <p className="text-xs text-white/70">Verified by Multi-Agent Workflow</p>
                   </div>
                 </div>
               </div>
@@ -271,12 +265,12 @@ const Index = () => {
         <section className="figma-section bg-white/65">
           <div className="figma-container grid gap-10 md:grid-cols-[0.85fr_1.15fr] md:items-center">
             <div>
-              <p className="mb-14 text-2xl font-semibold">Testimonials.</p>
+              <p className="mb-14 text-2xl font-semibold">User Experience.</p>
               <h2 className="text-4xl font-extrabold leading-tight tracking-tight md:text-6xl">
-                Our Patients<br />Feedback
+                What Doctors<br />Are Saying
               </h2>
               <p className="mt-16 max-w-sm text-lg leading-8 text-muted-foreground">
-                Clear reports and fast follow-up help clinical teams keep patients informed and confident.
+                Radiologists across clinical centers rely on XMedFusion for faster reporting and verifiable evidence links.
               </p>
               <Link to={session ? "/upload" : "/login"} className="mt-10 inline-flex circle-button">
                 <ArrowRight className="h-8 w-8" />
@@ -330,11 +324,11 @@ const Index = () => {
             </div>
             <div className="space-y-8 md:text-right">
               <p className="text-lg leading-8 text-muted-foreground">
-                A complete workspace for upload, interpretation, review, and transparent clinical delivery.
+                A complete workspace for interpretation, review, and transparent clinical delivery.
               </p>
               <Link to={session ? "/upload" : "/login"}>
-                <Button variant="outline" size="lg" className="rounded-full">
-                  Contact Now
+                <Button variant="outline" size="lg" className="rounded-full px-8">
+                  Try Diagnosis
                   <ArrowRight className="h-5 w-5" />
                 </Button>
               </Link>
@@ -370,8 +364,8 @@ const Index = () => {
                 Choose your patient, upload a scan, and let XMedFusion assemble a transparent report ready for clinical review.
               </p>
               <Link to={session ? "/upload" : "/login"} className="mt-9 inline-flex">
-                <Button variant="glass" size="lg" className="rounded-full bg-white text-foreground hover:bg-white/90">
-                  Get Appointment
+                <Button variant="glass" size="lg" className="rounded-full bg-white text-foreground hover:bg-white/90 px-10">
+                  Upload Scan
                   <ArrowRight className="h-5 w-5" />
                 </Button>
               </Link>

@@ -15,6 +15,7 @@ interface AnalysisContextType {
   // Data
   uploadedFile: File | null;
   previewUrl: string | null;
+  previewUrls: string[];
   referenceImageUrl: string | null;
   report: ParsedReport | null;
   knowledgeGraphData: any | null; 
@@ -39,7 +40,8 @@ interface AnalysisContextType {
     detectedModality?: string | null,
     explainabilityData?: any | null,
     referenceImageUrl?: string | null,
-    scanId?: string | null
+    scanId?: string | null,
+    allUrls?: string[]
   ) => void;
   
   resetAnalysis: () => void;
@@ -50,6 +52,7 @@ const AnalysisContext = createContext<AnalysisContextType | undefined>(undefined
 export const AnalysisProvider = ({ children }: { children: ReactNode }) => {
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewUrls, setPreviewUrls] = useState<string[]>([]);
   const [referenceImageUrl, setReferenceImageUrl] = useState<string | null>(null);
   const [report, setReport] = useState<ParsedReport | null>(null);
   const [knowledgeGraphData, setKgData] = useState<any | null>(null);
@@ -72,10 +75,12 @@ export const AnalysisProvider = ({ children }: { children: ReactNode }) => {
     modality: string | null = null,
     explainabilityPayload: any | null = null,
     referenceUrl: string | null = null,
-    scanId: string | null = null
+    scanId: string | null = null,
+    allUrls: string[] = []
   ) => {
     setUploadedFile(file);
     setPreviewUrl(url);
+    setPreviewUrls(allUrls.length > 0 ? allUrls : [url]);
     setReferenceImageUrl(referenceUrl);
     setReport(reportData);
     setKgData(kgData);
@@ -89,7 +94,9 @@ export const AnalysisProvider = ({ children }: { children: ReactNode }) => {
   const resetAnalysis = () => {
     setUploadedFile(null);
     if (previewUrl) URL.revokeObjectURL(previewUrl); 
+    previewUrls.forEach(u => { if (u !== previewUrl) URL.revokeObjectURL(u); });
     setPreviewUrl(null);
+    setPreviewUrls([]);
     setReferenceImageUrl(null);
     setReport(null);
     setKgData(null);
@@ -104,6 +111,7 @@ export const AnalysisProvider = ({ children }: { children: ReactNode }) => {
     <AnalysisContext.Provider value={{ 
       uploadedFile, 
       previewUrl, 
+      previewUrls,
       referenceImageUrl,
       report, 
       knowledgeGraphData, 

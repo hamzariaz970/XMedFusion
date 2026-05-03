@@ -1,6 +1,6 @@
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { Activity, Upload, Network, FileImage, Menu, X, Users, FileSearch, LogIn, LogOut, ShieldCheck, Brain, Plus, Loader2, LayoutDashboard } from "lucide-react";
+import { Activity, Upload, Network, Menu, X, Users, FileSearch, LogIn, LogOut, ShieldCheck, Brain, Plus, Loader2, LayoutDashboard } from "lucide-react";
 import { useState, useEffect } from "react";
 import { cn } from "@/lib/utils";
 import { usePatientContext } from "@/context/PatientContext";
@@ -15,8 +15,7 @@ const navItems = [
   { path: "/patients", label: "Patients", icon: Users, requiresAuth: true, requiresPatient: false, requiresReport: false },
   { path: "/upload", label: "Upload", icon: Upload, requiresAuth: true, requiresPatient: true, requiresReport: false },
   { path: "/explainability", label: "Explainability", icon: FileSearch, requiresAuth: true, requiresPatient: true, requiresReport: true },
-  { path: "/image-mapping", label: "Mapping", icon: FileImage, requiresAuth: true, requiresPatient: true, requiresReport: true },
-  { path: "/knowledge-graph", label: "Graph", icon: Network, requiresAuth: true, requiresPatient: true, requiresReport: true },
+  { path: "/knowledge-graph", label: "Evidence Graph", icon: Network, requiresAuth: true, requiresPatient: true, requiresReport: true },
 ];
 
 const AUTH_FEEDBACK_MS = 350;
