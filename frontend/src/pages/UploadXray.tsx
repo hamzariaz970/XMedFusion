@@ -43,6 +43,7 @@ import FeedbackPanel from "@/components/FeedbackPanel";
 import KnowledgeGraph from "@/components/KnowledgeGraph";
 import { supabase } from "@/lib/supabaseClient";
 import { toast } from "sonner";
+import { getApiBase } from "@/lib/apiConfig";
 
 type ProcessingStep = 'idle' | 'uploading' | 'analyzing' | 'complete';
 type ScanType = 'auto' | 'xray' | 'ct';
@@ -96,7 +97,15 @@ const UploadXray = () => {
   const displayFile = uploadedFile || tempFiles[0];
   const displayUrl = previewUrl || tempPreviews[0];
 
-  const parseReportText = (text: string): ExtendedParsedReport => {
+  const parseReportText = (text: string | undefined): ExtendedParsedReport => {
+    if (!text) {
+      return {
+        findings: "Report text was empty or undefined.",
+        impression: "No impression found.",
+        recommendation: undefined,
+        labels: []
+      };
+    }
     const findingsMatch = text.match(/FINDINGS:([\s\S]*?)(?=IMPRESSIONS?:|$)/i);
     const impressionMatch = text.match(/IMPRESSIONS?:([\s\S]*?)(?=RECOMMENDATIONS?:|LABELS:|$)/i);
     const recommendationMatch = text.match(/RECOMMENDATIONS?:([\s\S]*?)(?=LABELS:|$)/i);
@@ -145,7 +154,7 @@ const UploadXray = () => {
 
     try {
       setCurrentStep('analyzing');
-      const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
+      const API_BASE_URL = await getApiBase();
       const response = await fetch(`${API_BASE_URL}/api/synthesize-report`, {
         method: "POST",
         body: formData,
@@ -203,12 +212,24 @@ const UploadXray = () => {
               finishedSuccessfully = true;
               const parsedReport = parseReportText(data.final_report);
               const persistedScanType = data.detected_modality || (scanType === "auto" ? "unknown" : scanType);
+
+              // Safety timeout wrapper
+              const withTimeout = async (promise: any, ms = 10000): Promise<any> => {
+                return Promise.race([
+                  Promise.resolve(promise),
+                  new Promise((_, reject) => setTimeout(() => reject(new Error("Supabase request timed out")), ms))
+                ]);
+              };
+
               // Now save to Supabase BEFORE setting state
               let insertedScanId: string | null = null;
               try {
                 // Get Auth User ID since RLS requires user_id
-                const { data: { user } } = await supabase.auth.getUser();
+                console.log("[UploadXray] Fetching user...");
+                const { data: { user } } = await withTimeout(supabase.auth.getUser());
                 if (!user) throw new Error("Not authenticated");
+                console.log("[UploadXray] User fetched:", user.id);
+
 
                 const now = new Date().toISOString();
                 const fileExt = fileArray[0].name.split('.').pop() || 'png';
@@ -225,9 +246,11 @@ const UploadXray = () => {
                   const currentFileExt = currentFile.name.split('.').pop() || 'png';
                   const origFileName = `${baseFileName}_${i}.${currentFileExt}`;
 
-                  const { data: origData, error: origErr } = await supabase.storage
+                  console.log(`[UploadXray] Uploading original image ${i}...`);
+                  const { data: origData, error: origErr } = await withTimeout(supabase.storage
                     .from('medical-images')
-                    .upload(`${user.id}/${origFileName}`, currentFile);
+                    .upload(`${user.id}/${origFileName}`, currentFile));
+
 
                   if (origErr) {
                     throw new Error(`Failed to upload scan image ${i + 1}: ${origErr.message}`);
@@ -247,30 +270,25 @@ const UploadXray = () => {
 
                 // 2. Upload heatmap if we have one
                 if (data.heatmap) {
-                  const base64Data = data.heatmap.split('base64,')[1];
-                  if (base64Data) {
-                    const byteCharacters = atob(base64Data);
-                    const byteNumbers = new Array(byteCharacters.length);
-                    for (let i = 0; i < byteCharacters.length; i++) {
-                      byteNumbers[i] = byteCharacters.charCodeAt(i);
-                    }
-                    const byteArray = new Uint8Array(byteNumbers);
-                    const blob = new Blob([byteArray], { type: 'image/png' });
+                  console.log("[UploadXray] Converting heatmap base64 to blob...");
+                  const fetchResponse = await fetch(data.heatmap);
+                  const blob = await fetchResponse.blob();
 
-                    const { data: heatData, error: heatErr } = await supabase.storage
+                  console.log("[UploadXray] Uploading heatmap image...");
+                  const { data: heatData, error: heatErr } = await withTimeout(supabase.storage
+                    .from('medical-images')
+                    .upload(`${user.id}/${heatFileName}`, blob));
+
+
+                  if (heatErr) {
+                    console.warn("Heatmap upload failed:", heatErr.message);
+                  }
+
+                  if (!heatErr && heatData) {
+                    const { data: pubHeat } = supabase.storage
                       .from('medical-images')
-                      .upload(`${user.id}/${heatFileName}`, blob);
-
-                    if (heatErr) {
-                      console.warn("Heatmap upload failed:", heatErr.message);
-                    }
-
-                    if (!heatErr && heatData) {
-                      const { data: pubHeat } = supabase.storage
-                        .from('medical-images')
-                        .getPublicUrl(`${user.id}/${heatFileName}`);
-                      heatmap_image_url = pubHeat.publicUrl;
-                    }
+                      .getPublicUrl(`${user.id}/${heatFileName}`);
+                    heatmap_image_url = pubHeat.publicUrl;
                   }
                 }
 
@@ -281,7 +299,8 @@ const UploadXray = () => {
                 if (lowerImpression.includes('normal') || lowerFindings.includes('unremarkable')) severity = 'mild';
                 if (lowerImpression.includes('severe') || lowerImpression.includes('critical')) severity = 'severe';
 
-                const { data: insertedScan, error: insertErr } = await supabase.from('medical_scans').insert([{
+                console.log("[UploadXray] Inserting into medical_scans...");
+                const { data: insertedScan, error: insertErr } = await withTimeout(supabase.from('medical_scans').insert([{
                   patient_id: selectedPatient.id,
                   user_id: user.id,
                   scan_type: persistedScanType,
@@ -293,7 +312,8 @@ const UploadXray = () => {
                   labels: parsedReport.labels,
                   kg_data: data.knowledge_graph || null,
                   severity
-                }]).select('id').single();
+                }]).select('id').single());
+
 
                 if (insertErr) {
                   throw new Error(`Failed to save report to database: ${insertErr.message}`);
@@ -301,11 +321,16 @@ const UploadXray = () => {
 
                 if (insertedScan?.id) {
                   insertedScanId = insertedScan.id;
-                  await supabase
+                  console.log("[UploadXray] Updating patient timestamp...");
+                  await withTimeout(supabase
                     .from('patients')
                     .update({ updated_at: now })
-                    .eq('id', selectedPatient.id);
-                  await refreshPatients();
+                    .eq('id', selectedPatient.id));
+
+                  console.log("[UploadXray] Refreshing patients list...");
+                  if (refreshPatients) {
+                    await withTimeout(refreshPatients());
+                  }
                   toast.success("Report saved to patient history.");
                 }
               } catch (dbError) {
@@ -324,7 +349,8 @@ const UploadXray = () => {
               setCurrentStep('complete');
             }
           } catch (e) {
-            console.error("Error parsing stream line", e);
+            console.error("Error processing stream line", e, line);
+            alert(`Error processing backend response: ${e instanceof Error ? e.message : 'Unknown error'}`);
           }
         }
       }
@@ -417,8 +443,8 @@ const UploadXray = () => {
       try {
         const img = new Image();
         img.src = displayUrl;
-        await new Promise((resolve) => { 
-          img.onload = resolve; 
+        await new Promise((resolve) => {
+          img.onload = resolve;
           img.onerror = () => {
             console.warn("Failed to load image for PDF");
             resolve(null);
@@ -524,7 +550,7 @@ const UploadXray = () => {
                 Multi-agent diagnostic flow
               </Badge>
               <h1 className="mb-3 text-3xl font-extrabold tracking-tight text-foreground md:text-5xl">
-              AI Report <span className="text-primary">Synthesis</span>
+                AI Report <span className="text-primary">Synthesis</span>
               </h1>
               <p className="max-w-2xl text-muted-foreground">
                 Upload a scan, watch the agent pipeline progress, and review the generated report with evidence links.
@@ -687,7 +713,7 @@ const UploadXray = () => {
             <div className="space-y-6">
               {extendedReport ? (
                 <>
-                <Card className="surface-card border-primary/20 shadow-xl animate-in fade-in zoom-in-95 duration-500">
+                  <Card className="surface-card border-primary/20 shadow-xl animate-in fade-in zoom-in-95 duration-500">
                     <CardHeader className="flex flex-row items-center justify-between border-b border-border/50 bg-secondary/40">
                       <CardTitle className="flex items-center gap-2 text-lg">
                         <FileText className="w-5 h-5 text-primary" />

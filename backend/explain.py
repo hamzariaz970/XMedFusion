@@ -68,7 +68,7 @@ def apply_clinical_heuristics(zone_name, findings, x1, y1, x2, y2):
     # Return only the boxes that actually have findings
     return {k: v for k, v in grouped_boxes.items() if v["findings"]}
 
-def generate_explainable_image(image_path, kg_data, output_path):
+def generate_explainable_image(image_path, kg_data, output_path, modality="xray"):
     try:
         base_img = Image.open(image_path).convert("RGBA")
         width, height = base_img.size
@@ -81,50 +81,98 @@ def generate_explainable_image(image_path, kg_data, output_path):
         try: font = ImageFont.truetype("arial.ttf", font_size)
         except IOError: font = ImageFont.load_default()
 
-        findings_map = parse_kg_for_visuals(kg_data)
         has_findings = False
-        
-        for zone_name, findings_list in findings_map.items():
-            if zone_name not in ZONES: continue
-            
-            # Get absolute base coordinates for the zone
-            coords = ZONES[zone_name]
-            base_x1 = int(coords["x1_pct"] * width)
-            base_y1 = int(coords["y1_pct"] * height)
-            base_x2 = int(coords["x2_pct"] * width)
-            base_y2 = int(coords["y2_pct"] * height)
-            
-            # Get the smart, anatomically correct bounding boxes for this zone's diseases
-            smart_boxes = apply_clinical_heuristics(zone_name, findings_list, base_x1, base_y1, base_x2, base_y2)
-            
-            for box_type, data in smart_boxes.items():
-                has_findings = True
-                bx1, by1, bx2, by2 = data["coords"]
-                
-                # 1. Draw the clean, clinical outline
-                draw.rectangle([bx1, by1, bx2, by2], fill=None, outline=coords["color"], width=3)
-                
-                # 2. Build the Text Label
-                label_text = "\n".join(f"• {f}" for f in data["findings"])
-                
-                # Calculate text dimensions
-                try:
-                    bbox = font.getbbox(label_text)
-                    text_w, text_h = bbox[2] - bbox[0], bbox[3] - bbox[1]
-                except AttributeError:
-                    text_w, text_h = draw.textsize(label_text, font=font)
 
-                padding = 8
-                pill_x1 = bx1 + 5 
-                pill_y1 = by1 + 5
-                pill_x2 = pill_x1 + text_w + (padding * 2)
-                pill_y2 = pill_y1 + text_h + (padding * 2)
+        if modality == "ct":
+            # CT Explainability: Highlight specific grid cells
+            report_findings = kg_data.get("metadata", {}).get("report_findings", {})
+            
+            # Assume 4x4 grid as per vision_ct.py/synthesis.py
+            cols, rows = 4, 4
+            cell_w = width // cols
+            cell_h = height // rows
+            
+            for disease, data in report_findings.items():
+                if data.get("status") in ["present", "uncertain"] and data.get("slice_index") is not None:
+                    slice_idx = data["slice_index"]
+                    # 1-indexed to 0-indexed, and cap at 15
+                    idx = max(0, min(15, slice_idx - 1))
+                    col = idx % cols
+                    row = idx // cols
+                    
+                    bx1 = col * cell_w
+                    by1 = row * cell_h
+                    bx2 = bx1 + cell_w
+                    by2 = by1 + cell_h
+                    
+                    has_findings = True
+                    
+                    # Highlight the cell with a semi-transparent colored box
+                    highlight_color = (255, 99, 71, 80) if data.get("status") == "present" else (255, 165, 0, 80)
+                    draw.rectangle([bx1, by1, bx2, by2], fill=highlight_color, outline=(255, 255, 255, 200), width=2)
+                    
+                    # Add label
+                    label_text = f"{disease} (Slice {slice_idx})"
+                    try:
+                        bbox = font.getbbox(label_text)
+                        text_w, text_h = bbox[2] - bbox[0], bbox[3] - bbox[1]
+                    except AttributeError:
+                        text_w, text_h = draw.textsize(label_text, font=font)
+                        
+                    padding = 4
+                    pill_x1 = bx1 + 5 
+                    pill_y1 = by1 + 5
+                    pill_x2 = pill_x1 + text_w + (padding * 2)
+                    pill_y2 = pill_y1 + text_h + (padding * 2)
+                    
+                    draw.rectangle([pill_x1, pill_y1, pill_x2, pill_y2], fill=(0, 0, 0, 180), outline=(255,255,255,100), width=1)
+                    draw.text((pill_x1 + padding, pill_y1 + padding), label_text, fill=(255, 255, 255, 255), font=font)
+                    
+        else:
+            # X-ray Explainability (existing logic)
+            findings_map = parse_kg_for_visuals(kg_data)
+            
+            for zone_name, findings_list in findings_map.items():
+                if zone_name not in ZONES: continue
                 
-                # 3. Draw dark background for readability
-                draw.rectangle([pill_x1, pill_y1, pill_x2, pill_y2], fill=(0, 0, 0, 180), outline=coords["color"], width=1)
+                # Get absolute base coordinates for the zone
+                coords = ZONES[zone_name]
+                base_x1 = int(coords["x1_pct"] * width)
+                base_y1 = int(coords["y1_pct"] * height)
+                base_x2 = int(coords["x2_pct"] * width)
+                base_y2 = int(coords["y2_pct"] * height)
                 
-                # 4. Draw crisp white text
-                draw.text((pill_x1 + padding, pill_y1 + padding), label_text, fill=(255, 255, 255, 255), font=font)
+                # Get the smart, anatomically correct bounding boxes for this zone's diseases
+                smart_boxes = apply_clinical_heuristics(zone_name, findings_list, base_x1, base_y1, base_x2, base_y2)
+                
+                for box_type, data in smart_boxes.items():
+                    has_findings = True
+                    bx1, by1, bx2, by2 = data["coords"]
+                    
+                    # 1. Draw the clean, clinical outline
+                    draw.rectangle([bx1, by1, bx2, by2], fill=None, outline=coords["color"], width=3)
+                    
+                    # 2. Build the Text Label
+                    label_text = "\n".join(f"• {f}" for f in data["findings"])
+                    
+                    # Calculate text dimensions
+                    try:
+                        bbox = font.getbbox(label_text)
+                        text_w, text_h = bbox[2] - bbox[0], bbox[3] - bbox[1]
+                    except AttributeError:
+                        text_w, text_h = draw.textsize(label_text, font=font)
+
+                    padding = 8
+                    pill_x1 = bx1 + 5 
+                    pill_y1 = by1 + 5
+                    pill_x2 = pill_x1 + text_w + (padding * 2)
+                    pill_y2 = pill_y1 + text_h + (padding * 2)
+                    
+                    # 3. Draw dark background for readability
+                    draw.rectangle([pill_x1, pill_y1, pill_x2, pill_y2], fill=(0, 0, 0, 180), outline=coords["color"], width=1)
+                    
+                    # 4. Draw crisp white text
+                    draw.text((pill_x1 + padding, pill_y1 + padding), label_text, fill=(255, 255, 255, 255), font=font)
                 
         if has_findings:
             final_img = Image.alpha_composite(base_img, overlay).convert("RGB")

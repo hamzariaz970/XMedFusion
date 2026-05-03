@@ -5,17 +5,18 @@ import { useState, useEffect } from "react";
 import { cn } from "@/lib/utils";
 import { usePatientContext } from "@/context/PatientContext";
 import { useAuth } from "@/context/AuthContext";
+import { useAnalysis } from "@/context/AnalysisContext";
 import { supabase } from "@/lib/supabaseClient";
 import { toast } from "sonner";
 
 const navItems = [
-  { path: "/", label: "Home", icon: Activity, requiresAuth: false, requiresPatient: false },
-  { path: "/dashboard", label: "Dashboard", icon: LayoutDashboard, requiresAuth: true, requiresPatient: false },
-  { path: "/knowledge-graph", label: "Graph", icon: Network, requiresAuth: false, requiresPatient: false },
-  { path: "/patients", label: "Patients", icon: Users, requiresAuth: true, requiresPatient: false },
-  { path: "/upload", label: "Upload", icon: Upload, requiresAuth: true, requiresPatient: true },
-  { path: "/explainability", label: "Explainability", icon: FileSearch, requiresAuth: true, requiresPatient: true },
-  { path: "/image-mapping", label: "Mapping", icon: FileImage, requiresAuth: true, requiresPatient: true },
+  { path: "/", label: "Home", icon: Activity, requiresAuth: false, requiresPatient: false, requiresReport: false },
+  { path: "/dashboard", label: "Dashboard", icon: LayoutDashboard, requiresAuth: true, requiresPatient: false, requiresReport: false },
+  { path: "/patients", label: "Patients", icon: Users, requiresAuth: true, requiresPatient: false, requiresReport: false },
+  { path: "/upload", label: "Upload", icon: Upload, requiresAuth: true, requiresPatient: true, requiresReport: false },
+  { path: "/explainability", label: "Explainability", icon: FileSearch, requiresAuth: true, requiresPatient: true, requiresReport: true },
+  { path: "/image-mapping", label: "Mapping", icon: FileImage, requiresAuth: true, requiresPatient: true, requiresReport: true },
+  { path: "/knowledge-graph", label: "Graph", icon: Network, requiresAuth: true, requiresPatient: true, requiresReport: true },
 ];
 
 const AUTH_FEEDBACK_MS = 350;
@@ -26,6 +27,8 @@ export const Navbar = () => {
   const [isOpen, setIsOpen] = useState(false);
   const { session, isAdmin, isDoctor, user, signOut: authSignOut } = useAuth();
   const { selectedPatient, setSelectedPatient } = usePatientContext();
+  const { report, currentScanId } = useAnalysis();
+  const hasReport = !!report || !!currentScanId;
   const [hilTaskCount, setHilTaskCount] = useState(0);
   const [signingOut, setSigningOut] = useState(false);
 
@@ -50,10 +53,10 @@ export const Navbar = () => {
         new Promise((resolve) => setTimeout(resolve, AUTH_FEEDBACK_MS)),
       ]);
     } finally {
-      navigate("/login", { replace: true });
       setIsOpen(false);
-      toast.success("Signed out successfully.");
       setSigningOut(false);
+      // Hard redirect to clear Supabase in-memory session cache completely
+      window.location.href = "/login";
     }
   };
 
@@ -75,7 +78,8 @@ export const Navbar = () => {
               .filter(item => {
                 const passesAuth = !item.requiresAuth || session;
                 const passesPatient = !item.requiresPatient || selectedPatient;
-                return passesAuth && passesPatient;
+                const passesReport = !item.requiresReport || hasReport;
+                return passesAuth && passesPatient && passesReport;
               })
               .map((item) => (
                 <Link key={item.path} to={item.path}>
@@ -145,7 +149,8 @@ export const Navbar = () => {
                 .filter(item => {
                   const passesAuth = !item.requiresAuth || session;
                   const passesPatient = !item.requiresPatient || selectedPatient;
-                  return passesAuth && passesPatient;
+                  const passesReport = !item.requiresReport || hasReport;
+                  return passesAuth && passesPatient && passesReport;
                 })
                 .map((item) => (
                   <Link key={item.path} to={item.path} onClick={() => setIsOpen(false)}>

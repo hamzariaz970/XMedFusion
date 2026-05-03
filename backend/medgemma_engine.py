@@ -10,6 +10,11 @@ from pathlib import Path
 from PIL import Image
 from typing import Union, List, Optional
 import threading
+import os
+import config
+from config import HF_TOKEN
+
+os.environ["HF_TOKEN"] = HF_TOKEN
 
 # --- Singleton Engine ---
 class MedGemmaEngine:
@@ -50,13 +55,17 @@ class MedGemmaEngine:
         print(f"   Device: {self.device}")
         
         # Load processor
-        self.processor = AutoProcessor.from_pretrained(self.model_id)
+        self.processor = AutoProcessor.from_pretrained(
+            self.model_id,
+            token=HF_TOKEN
+        )
         
         # Load model with bfloat16 for efficiency
         self.model = AutoModelForImageTextToText.from_pretrained(
             self.model_id,
             torch_dtype=torch.bfloat16,
             device_map="auto",
+            token=HF_TOKEN
         )
         
         print("✅ MedGemma loaded successfully!")

@@ -16,6 +16,7 @@ import { cn } from "@/lib/utils";
 import { supabase } from "@/lib/supabaseClient";
 import { toast } from "sonner";
 import { useAuth } from "@/context/AuthContext";
+import { getApiBase } from "@/lib/apiConfig";
 
 interface Doctor { id: string; user_id: string; full_name: string; email: string; specialization: string; status: string; created_at: string; }
 interface UserRole { id: string; user_id: string; role: string; approval_status: string; created_at: string; }
@@ -58,6 +59,7 @@ const AdminDashboard = () => {
   const [hilReviewTaskId, setHilReviewTaskId] = useState<string|null>(null);
   const [hilReviewScans, setHilReviewScans] = useState<(HILScan & { report?: HILReport })[]>([]);
   const [hilFinetuning, setHilFinetuning] = useState(false);
+  const [clinicalFeedback, setClinicalFeedback] = useState<any[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const fetchDoctors = useCallback(async () => {
@@ -93,8 +95,8 @@ const AdminDashboard = () => {
 
   const fetchHealth = useCallback(async () => {
     try {
-      const API = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
-      const res = await fetch(`${API}/api/health`, { signal: AbortSignal.timeout(3000), headers: { "ngrok-skip-browser-warning": "true" } });
+      const API_BASE_URL = await getApiBase();
+      const res = await fetch(`${API_BASE_URL}/api/health`, { signal: AbortSignal.timeout(3000), headers: { "ngrok-skip-browser-warning": "true" } });
       if (res.ok) { setHealth(await res.json()); setHealthError(false); } else setHealthError(true);
     } catch { setHealthError(true); }
   }, []);
@@ -104,11 +106,30 @@ const AdminDashboard = () => {
     if (data) setHilTasks(data);
   }, []);
 
+  const fetchClinicalFeedback = useCallback(async () => {
+    const { data: fbData } = await supabase.from("feedback").select("*").eq("status", "approved").order("created_at", { ascending: false });
+    if (fbData && fbData.length > 0) {
+      const scanIds = fbData.map((f: any) => f.scan_id).filter(Boolean);
+      let scans: any[] = [];
+      if (scanIds.length > 0) {
+        const { data: scanData } = await supabase.from("medical_scans").select("id, original_image_url").in("id", scanIds);
+        if (scanData) scans = scanData;
+      }
+      const merged = fbData.map((f: any) => ({
+        ...f,
+        scan: scans.find(s => s.id === f.scan_id)
+      }));
+      setClinicalFeedback(merged);
+    } else {
+      setClinicalFeedback([]);
+    }
+  }, []);
+
   useEffect(() => {
-    fetchDoctors(); fetchPending(); fetchAdmins(); fetchCounts(); fetchHealth(); fetchHilTasks();
+    fetchDoctors(); fetchPending(); fetchAdmins(); fetchCounts(); fetchHealth(); fetchHilTasks(); fetchClinicalFeedback();
     const interval = setInterval(fetchHealth, 10000);
     return () => clearInterval(interval);
-  }, [fetchDoctors, fetchPending, fetchAdmins, fetchCounts, fetchHealth, fetchHilTasks]);
+  }, [fetchDoctors, fetchPending, fetchAdmins, fetchCounts, fetchHealth, fetchHilTasks, fetchClinicalFeedback]);
 
   // Approve / Reject pending
   const handleApprove = async (req: PendingRequest) => {
@@ -236,11 +257,21 @@ const AdminDashboard = () => {
     else { toast.success("Task deleted."); fetchHilTasks(); }
   };
 
+  const handleApproveClinicalHIL = async (feedbackId: string) => {
+    const { error } = await supabase.from("feedback").update({ status: "hil_approved" }).eq("id", feedbackId);
+    if (!error) {
+       toast.success("Sent for training the model!");
+       fetchClinicalFeedback();
+    } else {
+       toast.error(error.message);
+    }
+  };
+
   const handleRunFinetune = async (taskId: string) => {
     if (!confirm("Run HIL fine-tuning with all approved reports from this task?")) return;
     setHilFinetuning(true);
     try {
-      const apiBase = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
+      const apiBase = await getApiBase();
       const session = (await supabase.auth.getSession()).data.session;
       const res = await fetch(`${apiBase}/api/hil/finetune`, {
         method: "POST",
@@ -261,7 +292,7 @@ const AdminDashboard = () => {
   const pollFinetuneStatus = () => {
     const interval = setInterval(async () => {
       try {
-        const apiBase = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
+        const apiBase = await getApiBase();
         const res = await fetch(`${apiBase}/api/hil/finetune-status`, {
           headers: { "ngrok-skip-browser-warning": "true" },
         });
@@ -430,7 +461,7 @@ const AdminDashboard = () => {
             )}
 
             {/* HIL Feedback Tab */}
-            {activeTab === "hil" && (
+            {activeTab === "hil" && (<>
               <Card className="surface-card">
                 <CardHeader>
                   <div className="flex items-center justify-between">
@@ -491,6 +522,76 @@ const AdminDashboard = () => {
                   )}
                 </CardContent>
               </Card>
+
+              {/* Pending Clinical Approvals */}
+              <Card className="surface-card mt-6">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <CheckCircle className="w-5 h-5 text-emerald-500" />
+                    Pending Clinical Reports for HIL
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {clinicalFeedback.length === 0 ? (
+                    <div className="text-center py-8 text-muted-foreground">
+                      <CheckCircle className="w-10 h-10 mx-auto mb-3 opacity-40 text-emerald-500" />
+                      <p>No pending clinical reports to approve.</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {clinicalFeedback.map(fb => {
+                        const doc = doctors.find(d => d.user_id === fb.doctor_id);
+                        return (
+                          <div key={fb.id} className="space-y-3 rounded-[24px] border border-border/50 bg-white/70 p-4 transition-all duration-300 hover:border-emerald-500/30 hover:shadow-card">
+                            <div className="flex items-center justify-between">
+                              <div>
+                                <h4 className="font-semibold text-foreground">Scan ID: {fb.scan_id?.slice(0, 8)}...</h4>
+                                <p className="text-sm text-muted-foreground">Submitted by: {doc?.full_name || "Unknown Doctor"}</p>
+                              </div>
+                              <Badge variant="outline" className="bg-emerald-500/10 text-emerald-600 border-emerald-500/30">
+                                Pending Admin Approval
+                              </Badge>
+                            </div>
+                            
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-2">
+                              {fb.scan?.original_image_url && (
+                                <div>
+                                  <img 
+                                    src={fb.scan.original_image_url.split(',')[0]} 
+                                    alt="Scan" 
+                                    className="max-h-[200px] w-full rounded-[16px] border bg-black/5 object-contain" 
+                                  />
+                                </div>
+                              )}
+                              <div className="space-y-2 text-sm overflow-y-auto max-h-[200px] pr-2">
+                                <div>
+                                  <span className="font-semibold text-xs uppercase text-muted-foreground">Findings:</span>
+                                  <p className="mt-1">{fb.edited_findings || fb.original_findings}</p>
+                                </div>
+                                <div>
+                                  <span className="font-semibold text-xs uppercase text-muted-foreground">Impression:</span>
+                                  <p className="mt-1">{fb.edited_impression || fb.original_impression}</p>
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="flex justify-end mt-4 pt-3 border-t border-border/50">
+                              <Button 
+                                onClick={() => handleApproveClinicalHIL(fb.id)}
+                                className="gap-2 bg-emerald-600 hover:bg-emerald-700 shadow-glow"
+                              >
+                                <CheckCircle className="w-4 h-4" />
+                                Approve for HIL Training
+                              </Button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </>
             )}
           </div>
 

@@ -293,7 +293,7 @@ const Login = () => {
                 : "Enter your credentials to access the medical diagnostic agent."}
             </CardDescription>
           </CardHeader>
-          <form onSubmit={handleAuth}>
+          <form onSubmit={handleAuth} autoComplete="off">
             <CardContent className="space-y-4">
               {/* Sign-up only fields */}
               {isSignUp && (
@@ -350,6 +350,7 @@ const Login = () => {
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     required
+                    autoComplete="off"
                   />
                 </div>
               </div>
@@ -377,6 +378,7 @@ const Login = () => {
                     onChange={(e) => setPassword(e.target.value)}
                     required
                     minLength={6}
+                    autoComplete="new-password"
                   />
                 </div>
               </div>

@@ -112,12 +112,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setSession(null);
     setUser(null);
     setUserRole(null);
-    clearSupabaseAuthStorage();
 
     try {
       const { error } = await withTimeout(
-        supabase.auth.signOut({ scope: "local" }),
-        { error: new Error("Sign-out cleanup timed out locally.") },
+        supabase.auth.signOut(),
+        { error: new Error("Sign-out cleanup timed out.") },
         SIGN_OUT_TIMEOUT_MS
       );
       if (error) {

@@ -201,6 +201,7 @@ async def synthesize_report(
                             data["heatmap"] = f"data:image/png;base64,{b64_data}"
                         else:
                             data["heatmap"] = None
+                        print("[DEBUG] Yielding final JSON chunk from process_stream")
                         yield json.dumps(data) + "\n"
                     else:
                         yield chunk

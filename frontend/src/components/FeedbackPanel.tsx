@@ -148,11 +148,24 @@ const FeedbackPanel = ({ onReAnalyze }: FeedbackPanelProps) => {
   // --- Save/Approve ---
   const handleSave = async (status: FeedbackStatus) => {
     setSaving(true);
+    console.log("[handleSave] Start with status:", status);
+    
+    // Safety timeout wrapper
+    const withTimeout = async (promise: any, ms = 10000): Promise<any> => {
+      return Promise.race([
+        Promise.resolve(promise),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("Request timed out")), ms))
+      ]);
+    };
+
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      console.log("[handleSave] Fetching user...");
+      const { data: { user } } = await withTimeout(supabase.auth.getUser());
       if (!user) throw new Error("Not authenticated");
+      console.log("[handleSave] User fetched:", user.id);
 
       const reviewedKg = buildReviewedKnowledgeGraph();
+      console.log("[handleSave] KG built successfully");
       const payload = {
         doctor_id: user.id,
         scan_id: currentScanId,
@@ -168,7 +181,8 @@ const FeedbackPanel = ({ onReAnalyze }: FeedbackPanelProps) => {
       };
 
       if (currentScanId) {
-        const { error: scanUpdateError } = await supabase
+        console.log("[handleSave] Updating medical_scans for ID:", currentScanId);
+        const { error: scanUpdateError } = await withTimeout(supabase
           .from("medical_scans")
           .update({
             findings: edited.findings,
@@ -178,12 +192,15 @@ const FeedbackPanel = ({ onReAnalyze }: FeedbackPanelProps) => {
             kg_data: reviewedKg || knowledgeGraphData || null,
           })
           .eq("id", currentScanId)
-          .eq("user_id", user.id);
+          .eq("user_id", user.id));
 
+        console.log("[handleSave] Update finished, error:", scanUpdateError);
         if (scanUpdateError) throw scanUpdateError;
       }
 
-      const { error } = await supabase.from("feedback").insert(payload);
+      console.log("[handleSave] Inserting into feedback...");
+      const { error } = await withTimeout(supabase.from("feedback").insert(payload));
+      console.log("[handleSave] Insert finished, error:", error);
       if (error) {
         console.warn("Feedback audit insert skipped:", error.message);
       }
@@ -194,9 +211,12 @@ const FeedbackPanel = ({ onReAnalyze }: FeedbackPanelProps) => {
           ? "Report approved and saved!"
           : "Draft saved successfully."
       );
+      console.log("[handleSave] Success complete");
     } catch (e: any) {
+      console.error("[handleSave] Error caught:", e);
       toast.error(e.message || "Failed to save feedback.");
     } finally {
+      console.log("[handleSave] Finally block reached, setting saving=false");
       setSaving(false);
     }
   };

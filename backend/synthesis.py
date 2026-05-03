@@ -10,6 +10,9 @@ from langchain_community.chat_models import ChatOllama
 from validators import validate_report
 from PIL import Image 
 import config
+from config import HF_TOKEN
+
+os.environ["HF_TOKEN"] = HF_TOKEN
 
 load_dotenv(dotenv_path=Path(__file__).with_name(".env"))
 
@@ -122,7 +125,7 @@ def _load_ct_model():
         return _ct_model, _ct_proc
     print("[CT] Loading fine-tuned MedGemma CT model...")
     from peft import PeftModel as _PeftModel
-    _ct_proc = AutoProcessor.from_pretrained("google/medgemma-4b-it")
+    _ct_proc = AutoProcessor.from_pretrained("google/medgemma-4b-it", token=HF_TOKEN)
     _ct_proc.tokenizer.padding_side = "left"
     base = AutoModelForImageTextToText.from_pretrained(
         "google/medgemma-4b-it",
@@ -131,6 +134,7 @@ def _load_ct_model():
         # Required: use eager attention to avoid or_mask_function error
         # which requires torch>=2.6 flex-attention API
         attn_implementation="eager",
+        token=HF_TOKEN
     )
     _ct_model = _PeftModel.from_pretrained(base, CT_MODEL_PATH).merge_and_unload()
     # Force eager attention on merged model (merge_and_unload may reset it)
@@ -166,7 +170,8 @@ def _infer_ct_report(image_paths: list) -> str:
 
     prompt_text = (
         "You are an expert radiologist. Analyze this CT scan grid montage and write a "
-        "concise radiology report with FINDINGS and IMPRESSION sections."
+        "concise radiology report with FINDINGS and IMPRESSION sections. "
+        "If you detect an abnormality, clearly indicate the grid cell/slice number in brackets where it is visible (e.g., [Slice 5])."
     )
     user_msg = {
         "role": "user",
@@ -317,10 +322,14 @@ def extract_report_findings(report: str) -> dict:
             # Present beats uncertain, uncertain beats absent, absent beats not mentioned.
             rank = {"not_mentioned": 0, "absent": 1, "uncertain": 2, "present": 3}
             if rank[status] >= rank[findings[disease]["status"]]:
+                slice_match = re.search(r'\[Slice\s*(\d+)\]', sentence, flags=re.IGNORECASE)
+                slice_idx = int(slice_match.group(1)) if slice_match else None
+
                 findings[disease].update({
                     "status": status,
                     "source_sentence": sentence,
                     "matched_term": matched_term,
+                    "slice_index": slice_idx
                 })
 
     return findings
@@ -1336,7 +1345,7 @@ class LocalSynthesisAgent:
         
         # Run the generator
         explained_path = await asyncio.to_thread(
-            generate_explainable_image, target_image, kg_json, explain_img_path
+            generate_explainable_image, target_image, kg_json, explain_img_path, detected_modality
         )
 
         explainability_trace = {
@@ -1357,15 +1366,23 @@ class LocalSynthesisAgent:
         }
 
         print(f"\n[FINAL REPORT]:\n{final_report}\n")
-        yield json.dumps({
-            "status": "complete", 
-            "detected_modality": detected_modality,
-            "requested_scan_type": scan_type,
-            "final_report": final_report, 
-            "knowledge_graph": kg_json,
-            "explainability": explainability_trace,
-            "explainable_image_path": explained_path if explained_path else "Normal - No highlights needed"
-        }) + "\n"
+        try:
+            out_str = json.dumps({
+                "status": "complete", 
+                "detected_modality": detected_modality,
+                "requested_scan_type": scan_type,
+                "final_report": final_report, 
+                "knowledge_graph": kg_json,
+                "explainability": explainability_trace,
+                "explainable_image_path": explained_path if explained_path else "Normal - No highlights needed"
+            }) + "\n"
+            print("[DEBUG] Successfully serialized final chunk to JSON")
+            yield out_str
+        except Exception as e:
+            print(f"[ERROR] Failed to serialize final chunk: {e}")
+            import traceback
+            traceback.print_exc()
+            raise
 
 # -------------------------------
 # Example Usage (Test Block)

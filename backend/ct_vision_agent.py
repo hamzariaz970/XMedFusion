@@ -20,6 +20,9 @@ from PIL import Image
 from typing import List
 
 import config
+from config import HF_TOKEN
+
+os.environ["HF_TOKEN"] = HF_TOKEN
 
 # Fine-tuned model path (optional - if it exists after training, it will be preferred)
 FINETUNED_CT_MODEL_DIR = os.path.join(
@@ -137,7 +140,10 @@ class CTVisionAgent:
             print(f"[CT Agent] Loading base MedGemma model: {BASE_CT_MODEL_ID}")
 
         # Load processor
-        self._processor = AutoProcessor.from_pretrained(BASE_CT_MODEL_ID)
+        self._processor = AutoProcessor.from_pretrained(
+            BASE_CT_MODEL_ID,
+            token=HF_TOKEN
+        )
         self._processor.tokenizer.padding_side = "left"
 
         # 4-bit quantization to reduce VRAM footprint alongside the X-ray models
@@ -157,6 +163,7 @@ class CTVisionAgent:
                 # Use eager attention to avoid torch>=2.6 mask function requirement
                 attn_implementation="eager",
                 device_map="auto",
+                token=HF_TOKEN
             )
             self._model = PeftModel.from_pretrained(base, model_path)
             self._model = self._model.merge_and_unload()
@@ -168,6 +175,7 @@ class CTVisionAgent:
                 # Use eager attention to avoid torch>=2.6 mask function requirement
                 attn_implementation="eager",
                 device_map="auto",
+                token=HF_TOKEN
             )
 
         self._model.eval()

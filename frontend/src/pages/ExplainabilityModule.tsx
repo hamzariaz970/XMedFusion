@@ -12,11 +12,8 @@ import { FileSearch, Info, Activity, Sparkles } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
 
-// 1. Import the Context to get the stored data
 import { useAnalysis } from "@/context/AnalysisContext";
-
-// Use the same env var as UploadXray so Vercel deployments work correctly
-const BACKEND_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
+import { getApiBase } from "@/lib/apiConfig";
 
 const ExplainabilityModule = () => {
   const navigate = useNavigate();
@@ -38,7 +35,8 @@ const ExplainabilityModule = () => {
     queryFn: async () => {
       if (!findings || !impression) return null;
 
-      const response = await fetch(`${BACKEND_URL}/api/explain`, {
+      const API_BASE_URL = await getApiBase();
+      const response = await fetch(`${API_BASE_URL}/api/explain`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

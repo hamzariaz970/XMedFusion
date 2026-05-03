@@ -254,6 +254,7 @@ def run_evaluation(model_id_or_path, test_dataset, processor, device="cuda", tes
                 "google/medgemma-4b-it",
                 torch_dtype=torch.bfloat16,
                 device_map={"":"cuda:0"},  # avoids accelerate get_balanced_memory bug
+                token=HF_TOKEN
             )
             eval_model = PeftModelLoader.from_pretrained(base, model_id_or_path)
             eval_model = eval_model.merge_and_unload()
@@ -263,6 +264,7 @@ def run_evaluation(model_id_or_path, test_dataset, processor, device="cuda", tes
                 model_id_or_path,
                 torch_dtype=torch.bfloat16,
                 device_map={"":"cuda:0"},
+                token=HF_TOKEN
             )
 
         eval_model.eval()
@@ -422,7 +424,7 @@ def main():
     if torch.cuda.get_device_capability()[0] < 8:
         print("Warning: GPU does not officially support bfloat16 natively. Performance may be degraded.")
 
-    processor = AutoProcessor.from_pretrained(model_id)
+    processor = AutoProcessor.from_pretrained(model_id, token=HF_TOKEN)
     processor.tokenizer.padding_side = "right"
 
     print("Loading Demographics Metadata...")
@@ -482,7 +484,7 @@ def main():
         )
     }
     
-    model = AutoModelForImageTextToText.from_pretrained(model_id, **model_kwargs)
+    model = AutoModelForImageTextToText.from_pretrained(model_id, token=HF_TOKEN, **model_kwargs)
 
     peft_config = LoraConfig(
         lora_alpha=32, # Increased to force model to respect visual features
