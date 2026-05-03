@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import math
 import os
 from pathlib import Path
 from typing import Any, Sequence
@@ -27,6 +28,7 @@ from PIL import Image
 from config import HF_TOKEN
 
 os.environ["HF_TOKEN"] = HF_TOKEN
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
 DEFAULT_DATA_ROOT = Path(r"F:\XMedFusion\ct_rate")
 FALLBACK_DATA_ROOT = Path(__file__).resolve().parent / "data" / "ct_rate"
@@ -34,6 +36,8 @@ DEFAULT_GRID_SIZE = (4, 4)
 DEFAULT_PAGE_SIZE = (1024, 1024)
 DEFAULT_MODEL_ID = "google/medgemma-4b-it"
 DEFAULT_OUTPUT_DIR = Path("model_weights") / "Vision_Agent" / "medgemma_ct_multimontage_fullvolume_finetuned"
+DEFAULT_TRAIN_PAGE_SIZE = (512, 512)
+DEFAULT_EVAL_PAGE_SIZE = (768, 768)
 
 
 def discover_ct_rate_root(explicit_root: str | os.PathLike[str] | None = None) -> Path:
@@ -96,6 +100,71 @@ def _sorted_slice_paths(volume_dir: str | os.PathLike[str]) -> list[Path]:
     if not slice_paths:
         raise FileNotFoundError(f"No JPEG slices found in {volume_path}")
     return slice_paths
+
+
+def _volume_page_metadata_from_paths(
+    slice_paths: Sequence[Path],
+    *,
+    grid_size: tuple[int, int] = DEFAULT_GRID_SIZE,
+    target_size: tuple[int, int] = DEFAULT_PAGE_SIZE,
+    max_montages: int | None = None,
+) -> dict[str, Any]:
+    rows, cols = grid_size
+    slices_per_page = rows * cols
+    total_pages = math.ceil(len(slice_paths) / slices_per_page)
+
+    page_indices = list(range(total_pages))
+    if max_montages is not None:
+        page_indices = _page_selection_indices(total_pages, max_montages)
+
+    page_metadata: list[dict[str, Any]] = []
+    for selected_page_number, chunk_idx in enumerate(page_indices, start=1):
+        start = chunk_idx * slices_per_page
+        chunk = slice_paths[start : start + slices_per_page]
+        cell_metadata = []
+        for cell_idx in range(rows * cols):
+            col = cell_idx % cols
+            row = cell_idx // cols
+            if cell_idx < len(chunk):
+                source_path = chunk[cell_idx]
+                source_filename = source_path.name
+                source_order_index = start + cell_idx + 1
+            else:
+                source_filename = None
+                source_order_index = None
+            cell_metadata.append(
+                {
+                    "cell_index": cell_idx + 1,
+                    "row": row,
+                    "col": col,
+                    "source_filename": source_filename,
+                    "source_order_index": source_order_index,
+                }
+            )
+
+        page_metadata.append(
+            {
+                "rows": rows,
+                "cols": cols,
+                "tile_width": target_size[0] // cols,
+                "tile_height": target_size[1] // rows,
+                "slice_cells": cell_metadata,
+                "slice_start": start + 1 if chunk else None,
+                "slice_end": start + len(chunk) if chunk else None,
+                "slice_count": len(chunk),
+                "page_index": selected_page_number,
+                "source_page_index": chunk_idx + 1,
+            }
+        )
+
+    return {
+        "source_image_count": len(slice_paths),
+        "selected_page_count": len(page_metadata),
+        "total_possible_pages": total_pages,
+        "grid_size": {"rows": rows, "cols": cols},
+        "target_size": {"width": target_size[0], "height": target_size[1]},
+        "pages": page_metadata,
+    }
 
 
 def _page_selection_indices(total_pages: int, max_pages: int) -> list[int]:
@@ -201,14 +270,12 @@ def build_volume_montage_pages(
         pages.append(page_img)
         page_metadata.append(meta)
 
-    metadata = {
-        "source_image_count": len(slice_paths),
-        "selected_page_count": len(pages),
-        "total_possible_pages": total_pages,
-        "grid_size": {"rows": rows, "cols": cols},
-        "target_size": {"width": target_size[0], "height": target_size[1]},
-        "pages": page_metadata,
-    }
+    metadata = _volume_page_metadata_from_paths(
+        slice_paths,
+        grid_size=grid_size,
+        target_size=target_size,
+        max_montages=max_montages,
+    )
     return pages, metadata
 
 
@@ -276,6 +343,7 @@ def load_and_format_multimontage_dataset(
     with Path(csv_path).open(newline="", encoding="utf-8") as handle:
         rows = list(csv.DictReader(handle))
 
+    missing_volumes = 0
     for row in rows:
         vol_name = row.get("VolumeName", "").replace(".nii.gz", "").strip()
         findings = row.get("Findings_EN", "").strip()
@@ -285,9 +353,11 @@ def load_and_format_multimontage_dataset(
 
         volume_dir = jpegs_root_path / vol_name
         if not volume_dir.exists():
+            missing_volumes += 1
             continue
 
-        _, montage_meta = build_volume_montage_pages(volume_dir, max_montages=max_montages)
+        slice_paths = _sorted_slice_paths(volume_dir)
+        montage_meta = _volume_page_metadata_from_paths(slice_paths, max_montages=max_montages)
         report = f"FINDINGS:\n{findings}\n\nIMPRESSION:\n{impression}".strip()
         patient_demo = meta_dict.get(vol_name, "Patient demographics unknown")
         prompt_text = build_ct_rate_style_prompt(
@@ -316,6 +386,83 @@ def load_and_format_multimontage_dataset(
             }
         )
 
+    if records:
+        print(f"Prepared {len(records)} studies from {Path(csv_path).name}; skipped {missing_volumes} missing volumes.")
+    else:
+        print(f"Prepared 0 studies from {Path(csv_path).name}; skipped {missing_volumes} missing volumes.")
+    return HFDataset.from_list(records)
+
+
+def load_combined_available_multimontage_dataset(
+    *,
+    reports_csvs: Sequence[Path],
+    metadata_csvs: Sequence[Path],
+    jpegs_root: str | os.PathLike[str],
+    max_montages: int | None = None,
+) -> Any:
+    from datasets import Dataset as HFDataset
+
+    combined_meta: dict[str, str] = {}
+    for metadata_csv in metadata_csvs:
+        combined_meta.update(load_metadata_dict(metadata_csv))
+
+    jpegs_root_path = Path(jpegs_root)
+    records_by_id: dict[str, dict[str, Any]] = {}
+    missing_volumes = 0
+
+    for reports_csv in reports_csvs:
+        with reports_csv.open(newline="", encoding="utf-8") as handle:
+            rows = list(csv.DictReader(handle))
+
+        for row in rows:
+            vol_name = row.get("VolumeName", "").replace(".nii.gz", "").strip()
+            findings = row.get("Findings_EN", "").strip()
+            impression = row.get("Impressions_EN", "").strip()
+            if not vol_name or not findings:
+                continue
+            if vol_name in records_by_id:
+                continue
+
+            volume_dir = jpegs_root_path / vol_name
+            if not volume_dir.exists():
+                missing_volumes += 1
+                continue
+
+            slice_paths = _sorted_slice_paths(volume_dir)
+            montage_meta = _volume_page_metadata_from_paths(slice_paths, max_montages=max_montages)
+            report = f"FINDINGS:\n{findings}\n\nIMPRESSION:\n{impression}".strip()
+            patient_demo = combined_meta.get(vol_name, "Patient demographics unknown")
+            prompt_text = build_ct_rate_style_prompt(
+                patient_demo=patient_demo,
+                page_metadata=montage_meta["pages"],
+            )
+
+            records_by_id[vol_name] = {
+                "id": vol_name,
+                "volume_dir": str(volume_dir),
+                "patient_demo": patient_demo,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [{"type": "image"} for _ in range(montage_meta["selected_page_count"])]
+                        + [{"type": "text", "text": prompt_text}],
+                    },
+                    {
+                        "role": "assistant",
+                        "content": [{"type": "text", "text": report}],
+                    },
+                ],
+                "ground_truth": report,
+                "montage_metadata": montage_meta,
+            }
+
+    records = list(records_by_id.values())
+    print(f"Prepared {len(records)} available studies across {len(reports_csvs)} report files; skipped {missing_volumes} missing volumes.")
+    if not records:
+        raise RuntimeError(
+            f"No usable studies were found under {jpegs_root_path}. "
+            "Check that processed JPEG folders exist for the available CT-RATE reports."
+        )
     return HFDataset.from_list(records)
 
 
@@ -327,7 +474,7 @@ def generate_multimontage_report(
     patient_demo: str = "Patient demographics unknown",
     max_montages: int | None = None,
     grid_size: tuple[int, int] = DEFAULT_GRID_SIZE,
-    target_size: tuple[int, int] = DEFAULT_PAGE_SIZE,
+    target_size: tuple[int, int] = DEFAULT_EVAL_PAGE_SIZE,
     max_new_tokens: int = 512,
     max_time: int = 300,
 ) -> dict[str, Any]:
@@ -396,6 +543,12 @@ def _dataset_cache_dir(data_root: Path, split_name: str, max_montages: int | Non
     return data_root / "cached_dataset" / f"multimontage_{split_name}_{suffix}"
 
 
+def _available_split_cache_dir(data_root: Path, split_name: str, max_montages: int | None, test_size: float, seed: int) -> Path:
+    suffix = "all_pages" if max_montages is None else f"max_{max_montages}_pages"
+    test_pct = int(round(test_size * 100))
+    return data_root / "cached_dataset" / f"multimontage_available_{split_name}_{suffix}_test{test_pct}_seed{seed}"
+
+
 def load_or_create_multimontage_dataset(
     *,
     reports_csv: Path,
@@ -418,10 +571,52 @@ def load_or_create_multimontage_dataset(
         jpegs_root=jpegs_root,
         max_montages=max_montages,
     )
+    if len(dataset) == 0:
+        raise RuntimeError(
+            f"No usable studies were found for {reports_csv.name}. "
+            f"Check that processed JPEG folders exist under {jpegs_root} for this split."
+        )
     cache_dir.parent.mkdir(parents=True, exist_ok=True)
     dataset.save_to_disk(str(cache_dir))
     print(f"✅ Saved dataset cache to {cache_dir}")
     return dataset
+
+
+def load_or_create_available_split_datasets(
+    *,
+    data_root: Path,
+    reports_csvs: Sequence[Path],
+    metadata_csvs: Sequence[Path],
+    jpegs_root: Path,
+    max_montages: int | None,
+    test_size: float,
+    seed: int,
+) -> tuple[Any, Any]:
+    from datasets import load_from_disk
+
+    train_cache = _available_split_cache_dir(data_root, "train", max_montages, test_size, seed)
+    test_cache = _available_split_cache_dir(data_root, "test", max_montages, test_size, seed)
+
+    if train_cache.exists() and test_cache.exists():
+        print(f"✅ Loading cached available-data split from {train_cache.parent}")
+        return load_from_disk(str(train_cache)), load_from_disk(str(test_cache))
+
+    print("Building available-data multi-montage dataset from downloaded CT-RATE studies ...")
+    full_dataset = load_combined_available_multimontage_dataset(
+        reports_csvs=reports_csvs,
+        metadata_csvs=metadata_csvs,
+        jpegs_root=jpegs_root,
+        max_montages=max_montages,
+    )
+    split_dataset = full_dataset.train_test_split(test_size=test_size, seed=seed)
+    train_dataset = split_dataset["train"]
+    test_dataset = split_dataset["test"]
+
+    train_cache.parent.mkdir(parents=True, exist_ok=True)
+    train_dataset.save_to_disk(str(train_cache))
+    test_dataset.save_to_disk(str(test_cache))
+    print(f"✅ Saved available-data split caches to {train_cache.parent}")
+    return train_dataset, test_dataset
 
 
 def make_multimontage_collator(
@@ -429,7 +624,7 @@ def make_multimontage_collator(
     processor: Any,
     max_montages: int | None,
     grid_size: tuple[int, int] = DEFAULT_GRID_SIZE,
-    target_size: tuple[int, int] = DEFAULT_PAGE_SIZE,
+    target_size: tuple[int, int] = DEFAULT_TRAIN_PAGE_SIZE,
 ):
     def collate_fn(examples: Sequence[dict[str, Any]]) -> dict[str, Any]:
         texts: list[str] = []
@@ -497,6 +692,7 @@ def run_multimontage_evaluation(
     output_dir: str | os.PathLike[str],
     max_montages: int | None,
     eval_limit: int = 20,
+    target_size: tuple[int, int] = DEFAULT_EVAL_PAGE_SIZE,
 ) -> list[dict[str, Any]]:
     import torch
     from peft import PeftModel
@@ -536,6 +732,7 @@ def run_multimontage_evaluation(
             volume_dir=example["volume_dir"],
             patient_demo=example["patient_demo"],
             max_montages=max_montages,
+            target_size=target_size,
         )
         results.append(
             {
@@ -577,7 +774,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Fine-tune MedGemma on CT-RATE multi-montage studies.")
     parser.add_argument("--data-root", default=None, help="CT-RATE root. Defaults to F:\\XMedFusion\\ct_rate if present.")
     parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR), help="Directory to save adapter checkpoints.")
-    parser.add_argument("--max-montages", type=int, default=None, help="Maximum montage pages per study. Default uses all pages.")
+    parser.add_argument("--train-max-montages", type=int, default=4, help="Maximum montage pages per study during training. Default 4 for 16GB GPUs.")
+    parser.add_argument("--eval-max-montages", type=int, default=8, help="Maximum montage pages per study during evaluation/generation.")
+    parser.add_argument("--cache-max-montages", type=int, default=8, help="Maximum montage pages stored in cached metadata. Use a value >= train/eval page limits.")
+    parser.add_argument("--train-page-size", type=int, default=512, help="Square montage size used during training.")
+    parser.add_argument("--eval-page-size", type=int, default=768, help="Square montage size used during evaluation/generation.")
     parser.add_argument("--baseline", action="store_true", help="Run evaluation on the raw base MedGemma model.")
     parser.add_argument("--eval-only", action="store_true", help="Skip training and only evaluate the saved adapter.")
     parser.add_argument("--inspect-only", action="store_true", help="Print dataset/report examples and exit.")
@@ -585,6 +786,10 @@ def main() -> None:
     parser.add_argument("--epochs", type=int, default=1, help="Training epochs.")
     parser.add_argument("--learning-rate", type=float, default=5e-5, help="Learning rate.")
     parser.add_argument("--grad-accum", type=int, default=8, help="Gradient accumulation steps.")
+    parser.add_argument("--lora-r", type=int, default=8, help="LoRA rank.")
+    parser.add_argument("--lora-alpha", type=int, default=16, help="LoRA alpha.")
+    parser.add_argument("--test-size", type=float, default=0.1, help="Fraction of available studies reserved for test/eval.")
+    parser.add_argument("--split-seed", type=int, default=42, help="Random seed for the available-data train/test split.")
     args = parser.parse_args()
 
     paths = default_local_paths(args.data_root)
@@ -603,23 +808,21 @@ def main() -> None:
     processor = AutoProcessor.from_pretrained(DEFAULT_MODEL_ID, token=HF_TOKEN)
     processor.tokenizer.padding_side = "right"
 
-    train_cache = _dataset_cache_dir(paths["data_root"], "train", args.max_montages)
-    valid_cache = _dataset_cache_dir(paths["data_root"], "validation", args.max_montages)
-    train_dataset = load_or_create_multimontage_dataset(
-        reports_csv=paths["train_reports_csv"],
-        metadata_csv=paths["train_metadata_csv"],
+    train_dataset, valid_dataset = load_or_create_available_split_datasets(
+        data_root=paths["data_root"],
+        reports_csvs=[paths["train_reports_csv"], paths["valid_reports_csv"]],
+        metadata_csvs=[paths["train_metadata_csv"], paths["valid_metadata_csv"]],
         jpegs_root=paths["jpegs_root"],
-        cache_dir=train_cache,
-        max_montages=args.max_montages,
+        max_montages=args.cache_max_montages,
+        test_size=args.test_size,
+        seed=args.split_seed,
     )
-    valid_dataset = load_or_create_multimontage_dataset(
-        reports_csv=paths["valid_reports_csv"],
-        metadata_csv=paths["valid_metadata_csv"],
-        jpegs_root=paths["jpegs_root"],
-        cache_dir=valid_cache,
-        max_montages=args.max_montages,
+    print(
+        f"Available-data split ready: train={len(train_dataset)} | test={len(valid_dataset)} "
+        f"(test_size={args.test_size}, seed={args.split_seed}, "
+        f"train_max_montages={args.train_max_montages}, eval_max_montages={args.eval_max_montages}, "
+        f"train_page_size={args.train_page_size}, eval_page_size={args.eval_page_size})"
     )
-    print(f"Train size: {len(train_dataset)} | Validation size: {len(valid_dataset)}")
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -630,8 +833,9 @@ def main() -> None:
             test_dataset=valid_dataset,
             processor=processor,
             output_dir=output_dir,
-            max_montages=args.max_montages,
+            max_montages=args.eval_max_montages,
             eval_limit=args.eval_limit,
+            target_size=(args.eval_page_size, args.eval_page_size),
         )
         return
 
@@ -643,8 +847,9 @@ def main() -> None:
             test_dataset=valid_dataset,
             processor=processor,
             output_dir=output_dir,
-            max_montages=args.max_montages,
+            max_montages=args.eval_max_montages,
             eval_limit=args.eval_limit,
+            target_size=(args.eval_page_size, args.eval_page_size),
         )
         return
 
@@ -652,7 +857,7 @@ def main() -> None:
     model = AutoModelForImageTextToText.from_pretrained(
         DEFAULT_MODEL_ID,
         token=HF_TOKEN,
-        torch_dtype=torch.bfloat16,
+        dtype=torch.bfloat16,
         device_map="auto",
         attn_implementation="eager",
         quantization_config=BitsAndBytesConfig(
@@ -662,20 +867,28 @@ def main() -> None:
             bnb_4bit_compute_dtype=torch.bfloat16,
         ),
     )
+    model.config.use_cache = False
+    if hasattr(model, "vision_tower"):
+        model.vision_tower.requires_grad_(False)
+    if hasattr(model, "multi_modal_projector"):
+        model.multi_modal_projector.requires_grad_(False)
 
     peft_config = LoraConfig(
-        lora_alpha=32,
+        lora_alpha=args.lora_alpha,
         lora_dropout=0.05,
-        r=16,
+        r=args.lora_r,
         bias="none",
-        target_modules="all-linear",
+        target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
+        exclude_modules=["vision_tower", "multi_modal_projector"],
         task_type="CAUSAL_LM",
-        modules_to_save=["lm_head", "embed_tokens"],
+        modules_to_save=["lm_head"],
+        ensure_weight_tying=True,
     )
 
     collate_fn = make_multimontage_collator(
         processor=processor,
-        max_montages=args.max_montages,
+        max_montages=args.train_max_montages,
+        target_size=(args.train_page_size, args.train_page_size),
     )
 
     resume_from_checkpoint = output_dir.exists() and any(output_dir.iterdir())
@@ -690,13 +903,11 @@ def main() -> None:
         gradient_accumulation_steps=args.grad_accum,
         gradient_checkpointing=True,
         gradient_checkpointing_kwargs={"use_reentrant": False},
-        optim="adamw_torch_fused",
+        optim="paged_adamw_8bit",
         logging_steps=5,
-        eval_strategy="epoch",
+        eval_strategy="no",
         save_strategy="epoch",
-        load_best_model_at_end=True,
-        metric_for_best_model="eval_loss",
-        greater_is_better=False,
+        load_best_model_at_end=False,
         learning_rate=args.learning_rate,
         bf16=True,
         max_grad_norm=0.3,
@@ -732,8 +943,9 @@ def main() -> None:
         test_dataset=valid_dataset,
         processor=processor,
         output_dir=output_dir,
-        max_montages=args.max_montages,
+        max_montages=args.eval_max_montages,
         eval_limit=args.eval_limit,
+        target_size=(args.eval_page_size, args.eval_page_size),
     )
 
 
