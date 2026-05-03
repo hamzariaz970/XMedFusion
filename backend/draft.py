@@ -3,6 +3,7 @@
 import os
 import json
 import pickle
+import hashlib
 import torch
 import re
 import warnings
@@ -30,6 +31,7 @@ image_base_dir = r"data/iu_xray/images"
 BASE = Path(__file__).resolve().parent
 cache_file = BASE / "data" / "cache" / "reports_dict.pkl"
 report_records_cache_file = BASE / "data" / "cache" / "report_records.pkl"
+text_features_cache_file = BASE / "data" / "cache" / "report_text_features.pt"
 cache_file.parent.mkdir(parents=True, exist_ok=True)
 
 
@@ -91,6 +93,17 @@ else:
     with open(report_records_cache_file, "wb") as f:
         pickle.dump(report_records, f)
 
+
+def _report_text_signature(records):
+    digest = hashlib.sha256()
+    for record in records:
+        digest.update(record["report"].encode("utf-8", errors="ignore"))
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+REPORT_TEXT_SIGNATURE = _report_text_signature(report_records)
+
 # -------------------------------
 # Helper functions
 # -------------------------------
@@ -124,6 +137,22 @@ class RetrievalAgent:
             return self._text_features
         if not self._report_texts:
             return None
+
+        if text_features_cache_file.exists():
+            try:
+                payload = torch.load(text_features_cache_file, map_location="cpu")
+                if (
+                    payload.get("signature") == REPORT_TEXT_SIGNATURE
+                    and int(payload.get("count", -1)) == len(self._report_texts)
+                ):
+                    cached = payload.get("features")
+                    if cached is not None:
+                        self._text_features = cached.to(self.encoder.device)
+                        print(f"✅ Loaded cached retrieval text features ({len(self._report_texts)} reports)")
+                        return self._text_features
+            except Exception as exc:
+                print(f"⚠️ Failed to load cached text features: {exc}")
+
         batch_size = 64
         text_features_list = []
         for i in range(0, len(self._report_texts), batch_size):
@@ -131,6 +160,20 @@ class RetrievalAgent:
             batch_feat = self.encoder.encode_text(batch)
             text_features_list.append(batch_feat)
         self._text_features = torch.cat(text_features_list, dim=0)
+
+        try:
+            torch.save(
+                {
+                    "signature": REPORT_TEXT_SIGNATURE,
+                    "count": len(self._report_texts),
+                    "features": self._text_features.detach().cpu(),
+                },
+                text_features_cache_file,
+            )
+            print(f"✅ Cached retrieval text features to {text_features_cache_file}")
+        except Exception as exc:
+            print(f"⚠️ Failed to cache text features: {exc}")
+
         return self._text_features
 
     @staticmethod

@@ -126,12 +126,15 @@ CREATE TABLE public.medical_scans (
     user_id UUID REFERENCES auth.users(id) NOT NULL,
     scan_type TEXT NOT NULL,
     original_image_url TEXT,
+    source_images JSONB DEFAULT '[]'::jsonb,
     heatmap_image_url TEXT,
+    explainability_reference_image_url TEXT,
     findings TEXT,
     impression TEXT,
     recommendation TEXT,
     labels TEXT[] DEFAULT '{}',
     kg_data JSONB,
+    scan_metadata JSONB DEFAULT '{}'::jsonb,
     severity TEXT DEFAULT 'moderate',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { supabase } from "@/lib/supabaseClient";
 import { Button } from "@/components/ui/button";
@@ -60,6 +60,11 @@ const withAuthActionTimeout = async <T,>(promise: Promise<T>, message: string): 
   }
 };
 
+const deriveFallbackFullName = (email: string | undefined) => {
+  const localPart = email?.split("@")[0]?.trim();
+  return localPart || "Doctor";
+};
+
 const Login = () => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -68,7 +73,87 @@ const Login = () => {
   const [loading, setLoading] = useState(false);
   const [isSignUp, setIsSignUp] = useState(false);
   const navigate = useNavigate();
-  const { refreshRole } = useAuth();
+  const {
+    session,
+    refreshRole,
+    loading: authLoading,
+    roleLoading,
+    isAdmin,
+    isApproved,
+    isPending,
+    isRejected,
+  } = useAuth();
+
+  useEffect(() => {
+    if (authLoading || roleLoading || !session) {
+      return;
+    }
+
+    if (isApproved) {
+      navigate(isAdmin ? "/admin" : "/dashboard", { replace: true });
+      return;
+    }
+
+    if (isPending || isRejected) {
+      navigate("/pending", { replace: true });
+    }
+  }, [authLoading, isAdmin, isApproved, isPending, isRejected, navigate, roleLoading, session]);
+
+  const ensureDoctorProfile = async (
+    userId: string,
+    userEmail: string | undefined,
+    preferred?: { fullName?: string; specialization?: string }
+  ) => {
+    if (!userEmail) return;
+
+    const { data: existingProfile } = await supabase
+      .from("doctors")
+      .select("id, user_id, full_name, specialization, status")
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    if (existingProfile) {
+      return;
+    }
+
+    const { data: emailMatch } = await supabase
+      .from("doctors")
+      .select("id, user_id, full_name, specialization, status")
+      .eq("email", userEmail)
+      .maybeSingle();
+
+    const nextFullName = preferred?.fullName?.trim() || emailMatch?.full_name || deriveFallbackFullName(userEmail);
+    const nextSpecialization = preferred?.specialization || emailMatch?.specialization || "Radiology";
+
+    if (emailMatch) {
+      const { error: updateErr } = await supabase
+        .from("doctors")
+        .update({
+          user_id: userId,
+          full_name: nextFullName,
+          specialization: nextSpecialization,
+          status: emailMatch.status === "pre-approved" ? "active" : (emailMatch.status || "active"),
+        })
+        .eq("id", emailMatch.id);
+
+      if (updateErr) {
+        console.error("Failed to re-link doctor profile:", updateErr);
+      }
+      return;
+    }
+
+    const { error: insertErr } = await supabase.from("doctors").insert({
+      user_id: userId,
+      full_name: nextFullName,
+      email: userEmail,
+      specialization: nextSpecialization,
+      status: "active",
+    });
+
+    if (insertErr) {
+      console.error("Failed to self-heal doctor profile:", insertErr);
+    }
+  };
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -152,6 +237,11 @@ const Login = () => {
           }
         }
 
+        await ensureDoctorProfile(userId, email.trim(), {
+          fullName,
+          specialization,
+        });
+
         // 5. Refresh role context
         await refreshRole();
 
@@ -189,6 +279,10 @@ const Login = () => {
             .select("*")
             .eq("user_id", user.id)
             .maybeSingle();
+
+          if (roleData?.role === "doctor") {
+            await ensureDoctorProfile(user.id, user.email);
+          }
 
           await refreshRole();
 

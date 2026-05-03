@@ -8,32 +8,45 @@ import { RadiologyImageCard } from "@/components/RadiologyImageCard";
 import { radiologyImages } from "@/assets/radiology";
 
 const PendingApproval = () => {
-  const { isRejected, isApproved, isAdmin, session, signOut, refreshRole } = useAuth();
   const navigate = useNavigate();
+  const { isRejected, isApproved, isAdmin, session, signOut, refreshRole, loading, roleLoading } = useAuth();
 
-  // Auto-redirect if user is already approved
   useEffect(() => {
-    if (isApproved) {
-      navigate(isAdmin ? "/admin" : "/upload", { replace: true });
+    if (loading || roleLoading || !session) {
+      return;
     }
-  }, [isApproved, isAdmin, navigate]);
 
-  // Redirect to login if not logged in
+    if (isApproved) {
+      navigate(isAdmin ? "/admin" : "/dashboard", { replace: true });
+    }
+  }, [isAdmin, isApproved, loading, navigate, roleLoading, session]);
+
   useEffect(() => {
+    if (loading || roleLoading) {
+      return;
+    }
+
     if (!session) {
       navigate("/login", { replace: true });
     }
-  }, [session, navigate]);
+  }, [loading, navigate, roleLoading, session]);
 
   const handleSignOut = async () => {
     await signOut();
-    navigate("/login");
+    navigate("/login", { replace: true });
   };
 
   const handleRefresh = async () => {
     await refreshRole();
-    // The useEffect above will handle the redirect if approved
   };
+
+  if (loading || roleLoading) {
+    return (
+      <div className="clinical-shell relative flex min-h-screen w-full items-center justify-center overflow-hidden px-4 py-12 sm:px-8 lg:px-14">
+        <div className="text-sm text-muted-foreground">Loading...</div>
+      </div>
+    );
+  }
 
   return (
     <div className="clinical-shell relative flex min-h-screen w-full items-center justify-center overflow-hidden px-4 py-12 sm:px-8 lg:px-14">

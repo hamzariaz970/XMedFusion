@@ -25,8 +25,57 @@ interface HealthData { status: string; uptime_seconds: number; cpu_percent: numb
 interface HILTask { id: string; admin_id: string; doctor_id: string; title: string; instructions: string; total_scans: number; completed_scans: number; status: string; created_at: string; }
 interface HILReport { id: string; scan_id: string; task_id: string; doctor_id: string; indication: string; comparison: string; findings: string; impression: string; admin_feedback: string; status: string; }
 interface HILScan { id: string; task_id: string; image_url: string; scan_order: number; status: string; }
+interface FeedbackDoctor {
+  user_id: string;
+  full_name: string;
+  email: string;
+}
+interface FeedbackScanMeta {
+  id: string;
+  original_image_url: string | null;
+  source_images?: { url: string; filename?: string; order?: number }[] | null;
+  heatmap_image_url?: string | null;
+  explainability_reference_image_url?: string | null;
+}
+interface ClinicalFeedbackRow {
+  id: string;
+  doctor_id: string | null;
+  scan_id: string | null;
+  original_findings: string | null;
+  edited_findings: string | null;
+  original_impression: string | null;
+  edited_impression: string | null;
+  status: string;
+  doctor?: FeedbackDoctor | null;
+  scan?: FeedbackScanMeta | null;
+}
 
 function formatUptime(s: number) { const h = Math.floor(s/3600); const m = Math.floor((s%3600)/60); return h > 0 ? `${h}h ${m}m` : `${m}m`; }
+
+function getPreviewImageUrl(scan?: FeedbackScanMeta | null) {
+  if (scan?.explainability_reference_image_url) {
+    return scan.explainability_reference_image_url;
+  }
+
+  if (Array.isArray(scan?.source_images)) {
+    const firstSourceImage = scan.source_images
+      .map((image) => String(image?.url || "").trim())
+      .find(Boolean);
+    if (firstSourceImage) {
+      return firstSourceImage;
+    }
+  }
+
+  const rawUrl = scan?.original_image_url || scan?.heatmap_image_url || "";
+  if (!rawUrl) return null;
+
+  const firstUrl = rawUrl
+    .split(",")
+    .map((part) => part.trim())
+    .find(Boolean);
+
+  return firstUrl || null;
+}
 
 const AdminDashboard = () => {
   const { isAdmin } = useAuth();
@@ -59,7 +108,7 @@ const AdminDashboard = () => {
   const [hilReviewTaskId, setHilReviewTaskId] = useState<string|null>(null);
   const [hilReviewScans, setHilReviewScans] = useState<(HILScan & { report?: HILReport })[]>([]);
   const [hilFinetuning, setHilFinetuning] = useState(false);
-  const [clinicalFeedback, setClinicalFeedback] = useState<any[]>([]);
+  const [clinicalFeedback, setClinicalFeedback] = useState<ClinicalFeedbackRow[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const fetchDoctors = useCallback(async () => {
@@ -95,10 +144,19 @@ const AdminDashboard = () => {
 
   const fetchHealth = useCallback(async () => {
     try {
-      const API_BASE_URL = await getApiBase();
+      const API_BASE_URL = await getApiBase(true);
       const res = await fetch(`${API_BASE_URL}/api/health`, { signal: AbortSignal.timeout(3000), headers: { "ngrok-skip-browser-warning": "true" } });
-      if (res.ok) { setHealth(await res.json()); setHealthError(false); } else setHealthError(true);
-    } catch { setHealthError(true); }
+      if (res.ok) {
+        setHealth(await res.json());
+        setHealthError(false);
+      } else {
+        setHealth(null);
+        setHealthError(true);
+      }
+    } catch {
+      setHealth(null);
+      setHealthError(true);
+    }
   }, []);
 
   const fetchHilTasks = useCallback(async () => {
@@ -107,17 +165,38 @@ const AdminDashboard = () => {
   }, []);
 
   const fetchClinicalFeedback = useCallback(async () => {
-    const { data: fbData } = await supabase.from("feedback").select("*").eq("status", "approved").order("created_at", { ascending: false });
+    const { data: fbData } = await supabase
+      .from("feedback")
+      .select("id, doctor_id, scan_id, original_findings, edited_findings, original_impression, edited_impression, status")
+      .eq("status", "approved")
+      .order("created_at", { ascending: false });
+
     if (fbData && fbData.length > 0) {
-      const scanIds = fbData.map((f: any) => f.scan_id).filter(Boolean);
-      let scans: any[] = [];
+      const scanIds = fbData.map((f) => f.scan_id).filter(Boolean);
+      const doctorIds = fbData.map((f) => f.doctor_id).filter(Boolean);
+      let scans: FeedbackScanMeta[] = [];
+      let feedbackDoctors: FeedbackDoctor[] = [];
+
       if (scanIds.length > 0) {
-        const { data: scanData } = await supabase.from("medical_scans").select("id, original_image_url").in("id", scanIds);
+        const { data: scanData } = await supabase
+          .from("medical_scans")
+          .select("id, original_image_url, source_images, heatmap_image_url, explainability_reference_image_url")
+          .in("id", scanIds);
         if (scanData) scans = scanData;
       }
-      const merged = fbData.map((f: any) => ({
+
+      if (doctorIds.length > 0) {
+        const { data: doctorData } = await supabase
+          .from("doctors")
+          .select("user_id, full_name, email")
+          .in("user_id", doctorIds);
+        if (doctorData) feedbackDoctors = doctorData;
+      }
+
+      const merged: ClinicalFeedbackRow[] = fbData.map((f) => ({
         ...f,
-        scan: scans.find(s => s.id === f.scan_id)
+        doctor: feedbackDoctors.find((doctor) => doctor.user_id === f.doctor_id) || null,
+        scan: scans.find((scan) => scan.id === f.scan_id) || null,
       }));
       setClinicalFeedback(merged);
     } else {
@@ -540,13 +619,15 @@ const AdminDashboard = () => {
                   ) : (
                     <div className="space-y-4">
                       {clinicalFeedback.map(fb => {
-                        const doc = doctors.find(d => d.user_id === fb.doctor_id);
+                        const previewImageUrl = getPreviewImageUrl(fb.scan);
                         return (
                           <div key={fb.id} className="space-y-3 rounded-[24px] border border-border/50 bg-white/70 p-4 transition-all duration-300 hover:border-emerald-500/30 hover:shadow-card">
                             <div className="flex items-center justify-between">
                               <div>
                                 <h4 className="font-semibold text-foreground">Scan ID: {fb.scan_id?.slice(0, 8)}...</h4>
-                                <p className="text-sm text-muted-foreground">Submitted by: {doc?.full_name || "Unknown Doctor"}</p>
+                                <p className="text-sm text-muted-foreground">
+                                  Submitted by: {fb.doctor?.full_name || fb.doctor?.email || "Unknown Doctor"}
+                                </p>
                               </div>
                               <Badge variant="outline" className="bg-emerald-500/10 text-emerald-600 border-emerald-500/30">
                                 Pending Admin Approval
@@ -554,13 +635,17 @@ const AdminDashboard = () => {
                             </div>
                             
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-2">
-                              {fb.scan?.original_image_url && (
+                              {previewImageUrl ? (
                                 <div>
                                   <img 
-                                    src={fb.scan.original_image_url.split(',')[0]} 
+                                    src={previewImageUrl} 
                                     alt="Scan" 
                                     className="max-h-[200px] w-full rounded-[16px] border bg-black/5 object-contain" 
                                   />
+                                </div>
+                              ) : (
+                                <div className="flex min-h-[200px] items-center justify-center rounded-[16px] border border-dashed border-border/70 bg-muted/30 text-sm text-muted-foreground">
+                                  Scan preview unavailable
                                 </div>
                               )}
                               <div className="space-y-2 text-sm overflow-y-auto max-h-[200px] pr-2">

@@ -1,4 +1,3 @@
-import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Layout } from "@/components/layout/Layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,7 +9,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { FileSearch, Info, Activity, Sparkles } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
-import { cn } from "@/lib/utils";
 
 import { useAnalysis } from "@/context/AnalysisContext";
 import { getApiBase } from "@/lib/apiConfig";
@@ -20,7 +18,13 @@ const ExplainabilityModule = () => {
 
   // 2. Get Data directly from Global Context
   // We don't need to re-fetch because UploadXray already saved it here.
-  const { previewUrl, heatmapData, report } = useAnalysis();
+  const { previewUrl, referenceImageUrl, heatmapData, report, detectedModality, explainabilityData } = useAnalysis();
+  const displayReferenceImage = referenceImageUrl || previewUrl;
+  const modalityLabel = detectedModality === "ct" ? "CT scan" : "X-ray";
+  const inputPanelLabel = detectedModality === "ct" ? "Model Input Montage" : "Original Scan";
+  const inputPanelHint = detectedModality === "ct"
+    ? "The exact CT montage reviewed by MedGemma"
+    : "The original study used for analysis";
 
   // Parse the report to extract findings and impression for context
   const extendedReport = report as any; // Cast temporarily if interface isn't exported here
@@ -31,7 +35,7 @@ const ExplainabilityModule = () => {
 
   // 3. Query the Python Backend for the Explanation
   const { data: aiExplanation, isLoading: isAiLoading } = useQuery({
-    queryKey: ["geminiAnalysis", findings, impression],
+    queryKey: ["geminiAnalysis", findings, impression, detectedModality],
     queryFn: async () => {
       if (!findings || !impression) return null;
 
@@ -44,7 +48,8 @@ const ExplainabilityModule = () => {
         },
         body: JSON.stringify({
           findings,
-          impression
+          impression,
+          modality: detectedModality || "xray",
         })
       });
 
@@ -59,7 +64,7 @@ const ExplainabilityModule = () => {
 
       return data.explanation;
     },
-    enabled: !!previewUrl,
+    enabled: !!displayReferenceImage,
   });
 
   return (
@@ -75,24 +80,24 @@ const ExplainabilityModule = () => {
               Explainability <span className="text-primary">Module</span>
             </h1>
             <p className="max-w-2xl text-muted-foreground">
-              Visualize the evidence behind generated reports with original imaging, model highlights, and an AI narrative.
+              Visualize the evidence behind generated reports with the model input image, generated highlights, and an AI narrative.
             </p>
           </div>
           <RadiologyImageCard
-            src={previewUrl || radiologyImages.neuroReview}
+            src={displayReferenceImage || radiologyImages.neuroReview}
             alt="Radiology explainability review"
             label="Visual evidence"
-            caption={previewUrl ? "Current scan loaded" : "Heatmaps and narrative review"}
+            caption={displayReferenceImage ? inputPanelHint : "Heatmaps and narrative review"}
             className="min-h-[240px]"
           />
         </div>
 
-        {!previewUrl ? (
+        {!displayReferenceImage ? (
           <Card className="surface-card mx-auto max-w-2xl border-dashed">
             <CardContent className="flex flex-col items-center p-10">
               <FileSearch className="w-12 h-12 mb-4 text-muted-foreground opacity-50" />
               <p className="mb-6 text-center">
-                No image data found. Please upload an X-ray to begin analysis.
+                No image data found. Please upload a scan to begin analysis.
               </p>
               <Button onClick={handleBackToUpload}>Return to Upload</Button>
             </CardContent>
@@ -105,14 +110,14 @@ const ExplainabilityModule = () => {
               <Card className="surface-card overflow-hidden">
                 <CardHeader className="border-b border-border/50 bg-secondary/40">
                   <CardTitle className="text-sm font-medium flex items-center gap-2">
-                    <Activity className="w-4 h-4 text-primary" /> Original Scan
+                    <Activity className="w-4 h-4 text-primary" /> {inputPanelLabel}
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="flex aspect-square items-center justify-center bg-clinical-ink p-4">
                   <img
-                    src={previewUrl}
-                    alt="Original X-ray"
-                    className="max-h-full rounded-[18px] object-contain"
+                    src={displayReferenceImage}
+                    alt={`${inputPanelLabel} for ${modalityLabel}`}
+                    className="h-full max-h-full w-full rounded-[18px] object-contain"
                   />
                 </CardContent>
               </Card>
@@ -134,9 +139,13 @@ const ExplainabilityModule = () => {
                     />
                   ) : (
                     <div className="text-white text-center text-sm opacity-70 px-4">
-                      <p className="font-medium mb-2">No visual highlights generated.</p>
+                      <p className="font-medium mb-2">
+                        {detectedModality === "ct" ? "No slice-level highlights generated." : "No visual highlights generated."}
+                      </p>
                       <p className="text-xs opacity-50">
-                        The scan may be completely normal, or specific spatial bounding boxes could not be mapped.
+                        {detectedModality === "ct"
+                          ? "The CT report did not return usable slice references, or the study appeared normal."
+                          : "The scan may be completely normal, or specific spatial regions could not be mapped."}
                       </p>
                     </div>
                   )}
@@ -189,6 +198,14 @@ const ExplainabilityModule = () => {
                         }
                       </div>
                     </ScrollArea>
+                  ) : explainabilityData?.reasoning_steps?.length ? (
+                    <div className="space-y-3">
+                      {explainabilityData.reasoning_steps.map((step: string, idx: number) => (
+                        <div key={idx} className="rounded-[22px] border border-primary/10 bg-primary/5 p-4">
+                          <p className="text-sm leading-relaxed text-foreground/80">{step}</p>
+                        </div>
+                      ))}
+                    </div>
                   ) : (
                     <p className="text-sm text-muted-foreground italic">Narrative not available.</p>
                   )}

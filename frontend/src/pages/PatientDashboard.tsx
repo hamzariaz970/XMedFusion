@@ -57,12 +57,33 @@ interface MedicalScan {
   created_at: string;
   scan_type: string;
   original_image_url: string | null;
+  source_images?: { url: string; filename?: string; order?: number }[] | null;
   heatmap_image_url: string | null;
+  explainability_reference_image_url?: string | null;
   findings: string;
   impression: string;
   recommendation: string | null;
   labels: string[];
   severity: string;
+}
+
+function getStoredScanImages(scan: MedicalScan) {
+  if (Array.isArray(scan.source_images) && scan.source_images.length > 0) {
+    return scan.source_images
+      .map((img, index) => ({
+        url: String(img?.url || "").trim(),
+        label: img?.filename || `Scan #${index + 1}`,
+      }))
+      .filter((img) => img.url);
+  }
+
+  return (scan.original_image_url || "")
+    .split(",")
+    .map((url, index) => ({
+      url: url.trim(),
+      label: (scan.original_image_url || "").includes(",") ? `Scan #${index + 1}` : "Scan",
+    }))
+    .filter((img) => img.url);
 }
 
 const statusConfig = {
@@ -761,21 +782,29 @@ const PatientDashboard = () => {
 
                                     <div className="flex flex-col sm:flex-row gap-2 items-start sm:items-center justify-between mt-4 pb-2 border-b border-border/30">
                                       <div className="flex flex-wrap items-center gap-3">
-                                        {(scan.original_image_url || "").split(',').map((url, imgIndex) => {
-                                          const urlValue = url.trim();
-                                          if (!urlValue) return null;
+                                        {getStoredScanImages(scan).map((img, imgIndex) => {
                                           return (
                                             <a
                                               key={imgIndex}
-                                              href={urlValue}
+                                              href={img.url}
                                               target="_blank"
                                               rel="noreferrer"
                                               className="flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary hover:text-primary/80 hover:underline"
                                             >
-                                              <ImageIcon className="w-3.5 h-3.5" /> View Scan {(scan.original_image_url || "").includes(',') ? `#${imgIndex + 1}` : ''}
+                                              <ImageIcon className="w-3.5 h-3.5" /> {img.label}
                                             </a>
                                           );
                                         })}
+                                        {scan.explainability_reference_image_url && (
+                                          <a
+                                            href={scan.explainability_reference_image_url}
+                                            target="_blank"
+                                            rel="noreferrer"
+                                            className="flex items-center gap-1 rounded-full bg-blue-500/10 px-2.5 py-1 text-xs font-medium text-blue-500 hover:text-blue-400 hover:underline"
+                                          >
+                                            <Brain className="w-3.5 h-3.5" /> Model Montage
+                                          </a>
+                                        )}
                                         {scan.heatmap_image_url && (
                                           <a
                                             href={scan.heatmap_image_url}

@@ -11,6 +11,7 @@ from validators import validate_report
 from PIL import Image 
 import config
 from config import HF_TOKEN
+from ct_montage import build_ct_montage
 
 os.environ["HF_TOKEN"] = HF_TOKEN
 
@@ -19,8 +20,9 @@ load_dotenv(dotenv_path=Path(__file__).with_name(".env"))
 REPORT_CONTEXT_WINDOW = min(config.CONTEXT_WINDOW, 8192)
 LLM_TIMEOUT_SECONDS = 180
 REPORT_MAX_TOKENS = 420
-CT_GENERATION_TIMEOUT_SECONDS = 120
-CT_REQUEST_TIMEOUT_SECONDS = 240
+CT_GENERATION_TIMEOUT_SECONDS = int(os.getenv("CT_GENERATION_TIMEOUT_SECONDS", "180"))
+CT_REQUEST_TIMEOUT_SECONDS = int(os.getenv("CT_REQUEST_TIMEOUT_SECONDS", "420"))
+CT_COLD_START_TIMEOUT_SECONDS = int(os.getenv("CT_COLD_START_TIMEOUT_SECONDS", "900"))
 
 # <--- NEW IMPORTS --->
 from explain import generate_explainable_image
@@ -97,6 +99,20 @@ def _get_ensemble_evidence_agent():
     return _ensemble_evidence_agent
 
 
+def warm_ensemble_evidence_agent() -> bool:
+    """
+    Preload the RAD-DINO + XRV ensemble weights into process memory so the first
+    X-ray upload does not pay the initialization cost.
+    """
+    if not ENSEMBLE_KG_AVAILABLE:
+        print("[Warmup] X-ray ensemble unavailable; skipping preload.")
+        return False
+    print("[Warmup] Preloading RAD-DINO + XRV ensemble...")
+    _get_ensemble_evidence_agent()
+    print("[Warmup] RAD-DINO + XRV ensemble ready.")
+    return True
+
+
 def _query_label_scores_from_visual_evidence(visual_evidence: dict | None) -> dict:
     findings = (visual_evidence or {}).get("findings", {})
     scores = {}
@@ -144,44 +160,118 @@ def _load_ct_model():
     return _ct_model, _ct_proc
 
 
+def _ct_request_timeout_seconds(*, retry_mode: bool = False) -> int:
+    """Use a longer timeout for the first CT request because it includes model load + merge."""
+    if retry_mode:
+        return CT_REQUEST_TIMEOUT_SECONDS
+    return CT_COLD_START_TIMEOUT_SECONDS if _ct_model is None else CT_REQUEST_TIMEOUT_SECONDS
 
-def _infer_ct_report(image_paths: list) -> str:
+
+def warm_ct_model() -> bool:
     """
-    Build a grid montage from uploaded CT slices and generate a report
-    using the fine-tuned MedGemma model. No other agents are used.
+    Preload the CT MedGemma weights so CT uploads avoid first-request load time.
+    """
+    if not CT_AVAILABLE or not _TRANSFORMERS_OK:
+        print("[Warmup] CT model unavailable; skipping preload.")
+        return False
+    print("[Warmup] Preloading CT MedGemma model...")
+    _load_ct_model()
+    print("[Warmup] CT MedGemma model ready.")
+    return True
+
+
+def warm_optional_models() -> dict:
+    """
+    Warm models that are only used by specific modalities so upload latency is
+    paid at process startup instead of on the first matching request.
+    """
+    status = {
+        "xray_ensemble_ready": False,
+        "ct_model_ready": False,
+    }
+    try:
+        status["xray_ensemble_ready"] = warm_ensemble_evidence_agent()
+    except Exception as exc:
+        status["xray_ensemble_error"] = str(exc)
+        print(f"[Warmup] X-ray ensemble preload failed: {exc}")
+    try:
+        status["ct_model_ready"] = warm_ct_model()
+    except Exception as exc:
+        status["ct_model_error"] = str(exc)
+        print(f"[Warmup] CT preload failed: {exc}")
+    return status
+
+
+
+def _is_degenerate_ct_report(report: str) -> bool:
+    text = (report or "").strip()
+    if not text:
+        return True
+
+    normalized = re.sub(r"\s+", " ", text).strip().lower()
+    header_only_patterns = {
+        "findings:",
+        "impression:",
+        "findings: impression:",
+        "findings:\n\nimpression:",
+    }
+    if normalized in header_only_patterns:
+        return True
+
+    stripped = re.sub(r"\b(FINDINGS?|IMPRESSION|RECOMMENDATIONS?|LABELS?)\s*:\s*", " ", text, flags=re.IGNORECASE)
+    alpha_tokens = re.findall(r"[A-Za-z]{3,}", stripped)
+    if len(alpha_tokens) < 5:
+        return True
+
+    findings = _extract_report_section(text, "FINDING")
+    impression = _extract_report_section(text, "IMPRESSION")
+    findings_alpha = re.findall(r"[A-Za-z]{3,}", findings)
+    impression_alpha = re.findall(r"[A-Za-z]{3,}", impression)
+    if findings and len(findings_alpha) < 3:
+        return True
+    if impression and len(impression_alpha) < 2:
+        return True
+    if _looks_incomplete_clause(findings or text):
+        return True
+    if impression and _looks_incomplete_clause(impression):
+        return True
+    if not impression and _looks_incomplete_clause(text):
+        return True
+
+    return False
+
+
+def _infer_ct_report(ct_montage: Image.Image, *, retry_mode: bool = False) -> str:
+    """
+    Run the fine-tuned CT MedGemma model against a pre-built montage.
     """
     ct_model, ct_proc = _load_ct_model()
     device = next(ct_model.parameters()).device
 
-    # Build montage: directory of slices OR list of individual files
-    if len(image_paths) == 1 and os.path.isdir(image_paths[0]):
-        # Lazy import to avoid pandas/pytz chain at startup
-        from vision_ct import load_jpeg_montage as _ljm
-        grid_img = _ljm(image_paths[0])
+    if retry_mode:
+        prompt_text = (
+            "You are an expert thoracic radiologist. Analyze this CT scan grid montage and output exactly two sections.\n"
+            "FINDINGS: Write 1 to 4 complete sentences describing visible chest findings.\n"
+            "IMPRESSION: Write 1 to 2 complete sentences summarizing the main conclusion.\n"
+            "Do not echo the headers without content. Do not leave a section blank.\n"
+            "If the study appears normal, explicitly say so in complete sentences.\n"
+            "If you detect an abnormality, indicate the grid cell or slice number in brackets, for example [Slice 5]."
+        )
     else:
-        imgs = [Image.open(p).convert("RGB").resize((256, 256)) for p in image_paths]
-        n    = len(imgs)
-        cols = min(n, 4)
-        rows = (n + cols - 1) // cols
-        grid = Image.new("RGB", (256 * cols, 256 * rows))
-        for i, img in enumerate(imgs):
-            grid.paste(img, ((i % cols) * 256, (i // cols) * 256))
-        grid_img = grid
-
-    prompt_text = (
-        "You are an expert radiologist. Analyze this CT scan grid montage and write a "
-        "concise radiology report with FINDINGS and IMPRESSION sections. "
-        "If you detect an abnormality, clearly indicate the grid cell/slice number in brackets where it is visible (e.g., [Slice 5])."
-    )
+        prompt_text = (
+            "You are an expert radiologist. Analyze this CT scan grid montage and write a "
+            "concise radiology report with FINDINGS and IMPRESSION sections. "
+            "If you detect an abnormality, clearly indicate the grid cell/slice number in brackets where it is visible (e.g., [Slice 5])."
+        )
     user_msg = {
         "role": "user",
         "content": [
-            {"type": "image", "image": grid_img},
+            {"type": "image", "image": ct_montage},
             {"type": "text",  "text":  prompt_text},
         ]
     }
     formatted = ct_proc.apply_chat_template([user_msg], tokenize=False, add_generation_prompt=True)
-    inputs    = ct_proc(text=formatted, images=[grid_img], return_tensors="pt").to(device)
+    inputs    = ct_proc(text=formatted, images=[ct_montage], return_tensors="pt").to(device)
 
     # Prevent transformers from crashing on PyTorch < 2.6
     # by removing the token_type_ids that trigger the 'or_mask_function'
@@ -191,7 +281,7 @@ def _infer_ct_report(image_paths: list) -> str:
     with torch.no_grad():
         out_ids = ct_model.generate(
             **inputs,
-            max_new_tokens=160,
+            max_new_tokens=256,
             max_time=CT_GENERATION_TIMEOUT_SECONDS,
             do_sample=False,
             no_repeat_ngram_size=5,
@@ -270,10 +360,38 @@ NEGATION_TERMS = (
 )
 
 UNCERTAINTY_TERMS = ("possible", "possibly", "may represent", "suggesting", "questionable", "versus", "cannot exclude")
+TRAILING_INCOMPLETE_TOKENS = {
+    "a", "an", "the", "of", "with", "without", "for", "to", "from", "in", "on", "at",
+    "by", "into", "over", "under", "is", "are", "was", "were", "has", "have", "had",
+}
 
 
 def _split_sentences(text: str) -> list[str]:
     return [s.strip() for s in re.split(r"(?<=[.!?])\s+", text or "") if s.strip()]
+
+
+def _looks_incomplete_clause(text: str) -> bool:
+    stripped = (text or "").strip()
+    if not stripped:
+        return True
+    if stripped.endswith((".", "!", "?", "]")):
+        return False
+
+    tail = re.findall(r"[A-Za-z]+", stripped.lower())
+    if not tail:
+        return False
+    return tail[-1] in TRAILING_INCOMPLETE_TOKENS or len(tail[-1]) <= 2
+
+
+def _extract_json_block(text: str) -> str | None:
+    if not text:
+        return None
+    fenced = re.search(r"```(?:json)?\s*([\s\S]*?)```", text, flags=re.IGNORECASE)
+    if fenced:
+        return fenced.group(1).strip()
+
+    bracketed = re.search(r"(\[[\s\S]*\]|\{[\s\S]*\})", text)
+    return bracketed.group(1).strip() if bracketed else None
 
 
 def _term_is_negated(sentence: str, term: str) -> bool:
@@ -335,6 +453,123 @@ def extract_report_findings(report: str) -> dict:
     return findings
 
 
+def extract_ct_highlights(report: str) -> list[dict]:
+    """Extract generic CT slice-grounded highlights from any report sentence."""
+    text = " ".join([
+        _extract_report_section(report, "FINDING"),
+        _extract_report_section(report, "IMPRESSION"),
+    ]).strip() or (report or "")
+    highlights = []
+
+    for sentence in _split_sentences(text):
+        matches = re.findall(r"\[Slice\s*(\d+)\]", sentence, flags=re.IGNORECASE)
+        if not matches:
+            continue
+
+        cleaned_sentence = re.sub(r"\[Slice\s*\d+\]", "", sentence, flags=re.IGNORECASE)
+        cleaned_sentence = re.sub(r"\s+", " ", cleaned_sentence).strip(" .;,:")
+        if not cleaned_sentence:
+            continue
+
+        status = "uncertain" if _sentence_is_uncertain(sentence) else "present"
+        for raw_idx in matches:
+            highlights.append({
+                "label": cleaned_sentence,
+                "slice_index": int(raw_idx),
+                "status": status,
+                "source_sentence": sentence,
+            })
+
+    deduped = []
+    seen = set()
+    for highlight in highlights:
+        key = (highlight["label"].lower(), highlight["slice_index"], highlight["status"])
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(highlight)
+    return deduped
+
+
+def _ground_ct_report_findings(ct_montage: Image.Image, report: str) -> list[dict]:
+    """
+    Ask MedGemma for slice-grounded support so CT explainability does not depend
+    on the report text already containing [Slice N] tags.
+    """
+    if not report.strip():
+        return []
+
+    ct_model, ct_proc = _load_ct_model()
+    device = next(ct_model.parameters()).device
+    prompt_text = (
+        "You are grounding a CT radiology report to a 4x4 slice montage.\n"
+        "Given the report below, identify up to 4 clinically relevant visual findings and the single best supporting slice number from 1 to 16.\n"
+        "Return strict JSON as an array of objects with keys: label, slice_index, status.\n"
+        "Use status only as 'present' or 'uncertain'.\n"
+        "If the report is normal or there is no slice-localizable finding, return [].\n\n"
+        f"REPORT:\n{report.strip()}"
+    )
+    user_msg = {
+        "role": "user",
+        "content": [
+            {"type": "image", "image": ct_montage},
+            {"type": "text", "text": prompt_text},
+        ]
+    }
+
+    formatted = ct_proc.apply_chat_template([user_msg], tokenize=False, add_generation_prompt=True)
+    inputs = ct_proc(text=formatted, images=[ct_montage], return_tensors="pt").to(device)
+    if "token_type_ids" in inputs:
+        del inputs["token_type_ids"]
+
+    with torch.no_grad():
+        out_ids = ct_model.generate(
+            **inputs,
+            max_new_tokens=180,
+            max_time=min(CT_GENERATION_TIMEOUT_SECONDS, 120),
+            do_sample=False,
+            no_repeat_ngram_size=4,
+            repetition_penalty=1.05,
+            use_cache=False,
+        )
+
+    out_ids = out_ids[:, inputs["input_ids"].shape[1]:]
+    raw_output = ct_proc.decode(out_ids[0], skip_special_tokens=True).strip()
+    json_block = _extract_json_block(raw_output)
+    if not json_block:
+        return []
+
+    try:
+        parsed = json.loads(json_block)
+    except json.JSONDecodeError:
+        return []
+
+    if isinstance(parsed, dict):
+        parsed = parsed.get("highlights", [])
+    if not isinstance(parsed, list):
+        return []
+
+    grounded = []
+    for item in parsed[:4]:
+        if not isinstance(item, dict):
+            continue
+        label = str(item.get("label", "")).strip()
+        try:
+            slice_index = int(item.get("slice_index"))
+        except (TypeError, ValueError):
+            continue
+        if not label or slice_index < 1:
+            continue
+        status = "uncertain" if str(item.get("status", "")).lower() == "uncertain" else "present"
+        grounded.append({
+            "label": label,
+            "slice_index": slice_index,
+            "status": status,
+        })
+
+    return grounded
+
+
 def _anatomy_index(entities: list, anatomy_to_idx: dict, anatomy: str) -> int:
     if anatomy not in anatomy_to_idx:
         anatomy_to_idx[anatomy] = len(entities)
@@ -345,6 +580,10 @@ def _anatomy_index(entities: list, anatomy_to_idx: dict, anatomy: str) -> int:
 def build_kg_from_synthesis_report(final_report: str, evidence_bundle: dict | None = None) -> dict:
     """Build the actual frontend KG from the final report, with evidence as metadata."""
     report_findings = extract_report_findings(final_report)
+    ct_highlights = extract_ct_highlights(final_report)
+    grounded_highlights = (evidence_bundle or {}).get("ct_grounding") or []
+    if not ct_highlights and grounded_highlights:
+        ct_highlights = grounded_highlights
     entities = []
     relations = []
     anatomy_to_idx = {}
@@ -366,6 +605,21 @@ def build_kg_from_synthesis_report(final_report: str, evidence_bundle: dict | No
             entities.append([disease.lower(), "Observation"])
             relations.append([obs_idx, anat_idx, "located_at"])
 
+    if not entities and ct_highlights:
+        chest_idx = _anatomy_index(entities, anatomy_to_idx, "chest")
+        for highlight in ct_highlights:
+            label = str(highlight.get("label", "")).strip().lower()
+            if not label:
+                continue
+            obs_idx = len(entities)
+            status = str(highlight.get("status", "present")).lower()
+            if status == "uncertain":
+                entities.append([label, "UncertainObservation"])
+                relations.append([obs_idx, chest_idx, "possible_at"])
+            else:
+                entities.append([label, "Observation"])
+                relations.append([obs_idx, chest_idx, "located_at"])
+
     if not entities:
         chest_idx = _anatomy_index(entities, anatomy_to_idx, "chest")
         obs_idx = len(entities)
@@ -378,6 +632,8 @@ def build_kg_from_synthesis_report(final_report: str, evidence_bundle: dict | No
         "metadata": {
             "kg_source": "synthesis_report",
             "report_findings": report_findings,
+            "ct_highlights": ct_highlights,
+            "ct_montage": (evidence_bundle or {}).get("ct_montage"),
             "evidence_sources": evidence_bundle or {},
         },
     }
@@ -1108,40 +1364,55 @@ class LocalSynthesisAgent:
                 return spatial_kg, "KG Error.", visual_evidence, "Classifier evidence error."
 
         # --- EXECUTION FLOW ---
+        ct_montage = None
 
         if detected_modality == "ct":
             # -------------------------------------------------------
             # CT PIPELINE: MedGemma grid-montage → direct report
             # -------------------------------------------------------
             raw_spatial_kg = None
-            kg_text_block = "CT scan - image-only X-ray KG evidence is not applicable."
+            kg_text_block = "CT scan - graph facts are derived from the CT report text and slice references."
             visual_evidence = None
             visual_evidence_text = "CT scan - classifier evidence not applicable."
             evidence_bundle = {}
             draft_report = "N/A"
             vision_report = "N/A"
+            ct_montage = None
+            ct_montage_metadata = None
 
             if not CT_AVAILABLE:
                 yield json.dumps({"status": "error", "message": f"CT model weights not found at {CT_MODEL_PATH}."}) + "\n"
                 return
 
-            # Fake KG Agent sequence for frontend aesthetics
-            yield json.dumps({"status": "kg_start", "message": "Mapping CT scan to clinical knowledge graph..."}) + "\n"
-            await asyncio.sleep(1.0)
-
-            # Start Vision Agent sequence
-            yield json.dumps({"status": "vision_start", "message": "CT Vision Agent building montage & running MedGemma inference..."}) + "\n"
+            yield json.dumps({"status": "kg_start", "message": "Preparing CT montage and report-derived graph scaffold..."}) + "\n"
 
             try:
+                ct_montage, ct_montage_metadata = await asyncio.to_thread(build_ct_montage, image_paths)
+                evidence_bundle = {
+                    "ct_montage": ct_montage_metadata,
+                }
+            except Exception as e:
+                print(f"[CT Path] ❌ Failed to build CT montage: {e}")
+                yield json.dumps({"status": "error", "message": f"CT montage construction failed: {e}"}) + "\n"
+                return
+
+            yield json.dumps({"status": "vision_start", "message": "CT Vision Agent building montage & running MedGemma inference..."}) + "\n"
+
+            ct_timeout_seconds = _ct_request_timeout_seconds()
+            try:
                 vision_report = await asyncio.wait_for(
-                    asyncio.to_thread(_infer_ct_report, image_paths),
-                    timeout=CT_REQUEST_TIMEOUT_SECONDS,
+                    asyncio.to_thread(_infer_ct_report, ct_montage),
+                    timeout=ct_timeout_seconds,
                 )
             except asyncio.TimeoutError:
-                print(f"[CT Path] ⚠️ CT inference timed out after {CT_REQUEST_TIMEOUT_SECONDS}s")
+                print(f"[CT Path] ⚠️ CT inference timed out after {ct_timeout_seconds}s")
                 yield json.dumps({
                     "status": "error",
-                    "message": f"CT inference timed out after {CT_REQUEST_TIMEOUT_SECONDS} seconds. Try fewer slices or verify the MedGemma CT runtime."
+                    "message": (
+                        f"CT inference timed out after {ct_timeout_seconds} seconds. "
+                        "If this was the first CT request after startup, the MedGemma model was likely still loading. "
+                        "Retry once after warmup, or reduce the slice count."
+                    )
                 }) + "\n"
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
@@ -1151,11 +1422,61 @@ class LocalSynthesisAgent:
                 yield json.dumps({"status": "error", "message": f"CT inference failed: {e}"}) + "\n"
                 return
 
-            # Fake Synthesis Agent sequence
+            if _is_degenerate_ct_report(vision_report):
+                print(f"[CT Path] ⚠️ Degenerate CT output on first pass: {vision_report[:200]!r}")
+                yield json.dumps({"status": "vision_retry", "message": "Initial CT report was incomplete. Retrying with stricter report constraints..."}) + "\n"
+                ct_retry_timeout_seconds = _ct_request_timeout_seconds(retry_mode=True)
+                try:
+                    retry_report = await asyncio.wait_for(
+                        asyncio.to_thread(_infer_ct_report, ct_montage, retry_mode=True),
+                        timeout=ct_retry_timeout_seconds,
+                    )
+                    vision_report = retry_report
+                except asyncio.TimeoutError:
+                    print(f"[CT Path] ⚠️ CT retry timed out after {ct_retry_timeout_seconds}s")
+                    yield json.dumps({
+                        "status": "error",
+                        "message": "CT inference produced an incomplete report and the recovery retry timed out."
+                    }) + "\n"
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                    return
+                except Exception as e:
+                    print(f"[CT Path] ❌ CT retry failed: {e}")
+                    yield json.dumps({"status": "error", "message": f"CT recovery retry failed: {e}"}) + "\n"
+                    return
+
+            if _is_degenerate_ct_report(vision_report):
+                print(f"[CT Path] ❌ Degenerate CT output after retry: {vision_report[:200]!r}")
+                yield json.dumps({
+                    "status": "error",
+                    "message": "CT model produced an incomplete report. Try a clearer slice set or fewer higher-quality slices."
+                }) + "\n"
+                return
+
             yield json.dumps({"status": "synthesis_start", "message": "Structuring MedGemma raw output into Final Report format..."}) + "\n"
             await asyncio.sleep(0.5)
 
             final_report = self._clean_output(vision_report)
+            if _is_degenerate_ct_report(final_report):
+                yield json.dumps({
+                    "status": "error",
+                    "message": "CT model returned an incomplete report after retry. No report was saved."
+                }) + "\n"
+                return
+
+            try:
+                evidence_bundle["ct_grounding"] = await asyncio.wait_for(
+                    asyncio.to_thread(_ground_ct_report_findings, ct_montage, final_report),
+                    timeout=180,
+                )
+            except asyncio.TimeoutError:
+                print("[CT Path] ⚠️ CT grounding pass timed out; continuing without slice-grounded highlights.")
+                evidence_bundle["ct_grounding"] = []
+            except Exception as exc:
+                print(f"[CT Path] ⚠️ CT grounding pass failed: {exc}")
+                evidence_bundle["ct_grounding"] = []
+
             print(f"\n[FINAL CT REPORT]:\n{final_report}\n")
 
         else:
@@ -1342,10 +1663,26 @@ class LocalSynthesisAgent:
         new_filename = f"{parent_folder}_{file_name}".replace(".png", "_explained.png").replace(".jpg", "_explained.jpg")
         
         explain_img_path = os.path.join(explain_dir, new_filename)
+        reference_img_path = None
+
+        if detected_modality == "ct" and ct_montage is not None:
+            reference_img_path = os.path.join(
+                explain_dir,
+                new_filename.replace("_explained", "_reference_montage").replace(".jpg", ".png")
+            )
+            try:
+                ct_montage.save(reference_img_path)
+            except Exception as exc:
+                print(f"⚠️ Could not save CT montage reference image: {exc}")
+                reference_img_path = None
         
         # Run the generator
         explained_path = await asyncio.to_thread(
-            generate_explainable_image, target_image, kg_json, explain_img_path, detected_modality
+            generate_explainable_image,
+            reference_img_path if detected_modality == "ct" and reference_img_path else target_image,
+            kg_json,
+            explain_img_path,
+            detected_modality,
         )
 
         explainability_trace = {
@@ -1355,14 +1692,25 @@ class LocalSynthesisAgent:
                 "visual_classifier_evidence": visual_evidence_text,
                 "retrieval_agent_draft": draft_report
             },
-            "reasoning_steps": [
-                f"1. Verified image modality as '{detected_modality.upper()}'.",
-                "2. Extracted raw visual description from the Vision Agent.",
-                "3. Generated structured KG/classifier evidence with confidence and provenance.",
-                "4. Retrieved top-k visually similar historical cases.",
-                "5. Synthesized the final report by adjudicating vision text against structured evidence.",
-                "6. Built the frontend knowledge graph from the final synthesized report."
-            ]
+            "reasoning_steps": (
+                [
+                    f"1. Verified image modality as '{detected_modality.upper()}'.",
+                    "2. Built a fixed 4x4 CT montage from the uploaded slice set so inference and explainability use the same visual reference.",
+                    "3. Ran the CT Vision Agent (MedGemma) on that montage to produce the draft CT report.",
+                    "4. Ran a dedicated CT grounding pass to map clinically relevant findings onto montage slice cells.",
+                    "5. Built the frontend knowledge graph from the final report plus slice-grounded CT highlights.",
+                    "6. Rendered CT explainability overlays on the grounded montage cells."
+                ]
+                if detected_modality == "ct"
+                else [
+                    f"1. Verified image modality as '{detected_modality.upper()}'.",
+                    "2. Extracted raw visual description from the Vision Agent.",
+                    "3. Generated structured KG/classifier evidence with confidence and provenance.",
+                    "4. Retrieved top-k visually similar historical cases.",
+                    "5. Synthesized the final report by adjudicating vision text against structured evidence.",
+                    "6. Built the frontend knowledge graph from the final synthesized report."
+                ]
+            )
         }
 
         print(f"\n[FINAL REPORT]:\n{final_report}\n")
@@ -1374,6 +1722,7 @@ class LocalSynthesisAgent:
                 "final_report": final_report, 
                 "knowledge_graph": kg_json,
                 "explainability": explainability_trace,
+                "explainability_reference_image_path": reference_img_path,
                 "explainable_image_path": explained_path if explained_path else "Normal - No highlights needed"
             }) + "\n"
             print("[DEBUG] Successfully serialized final chunk to JSON")

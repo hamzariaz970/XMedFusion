@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { Layout } from "@/components/layout/Layout";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -39,6 +39,7 @@ import jsPDF from "jspdf";
 // Import Global Context
 import { useAnalysis, ParsedReport } from "@/context/AnalysisContext";
 import { usePatientContext } from "@/context/PatientContext";
+import { useAuth } from "@/context/AuthContext";
 import FeedbackPanel from "@/components/FeedbackPanel";
 import KnowledgeGraph from "@/components/KnowledgeGraph";
 import { supabase } from "@/lib/supabaseClient";
@@ -47,6 +48,8 @@ import { getApiBase } from "@/lib/apiConfig";
 
 type ProcessingStep = 'idle' | 'uploading' | 'analyzing' | 'complete';
 type ScanType = 'auto' | 'xray' | 'ct';
+const CT_MAX_UPLOAD_FILES = 64;
+const CT_MODEL_SLICE_COUNT = 16;
 
 interface ExtendedParsedReport extends ParsedReport {
   recommendation?: string;
@@ -60,7 +63,7 @@ const XRAY_AGENT_STEPS = [
 ];
 
 const CT_AGENT_STEPS = [
-  { id: 'kg', label: 'Knowledge Graph Agent', description: 'Mapping CT scan to clinical knowledge graph...', icon: Network, color: 'text-purple-500', progress: 20 },
+  { id: 'kg', label: 'Clinical Graph Builder', description: 'Preparing CT montage and report-derived graph scaffold...', icon: Network, color: 'text-purple-500', progress: 20 },
   { id: 'vision', label: 'CT Vision Agent (MedGemma)', description: 'Building CT slice montage and running MedGemma inference...', icon: Brain, color: 'text-blue-500', progress: 55 },
   { id: 'synthesis', label: 'Report Synthesis', description: 'Structuring CT findings into FINDINGS / IMPRESSION format...', icon: Sparkles, color: 'text-emerald-500', progress: 90 }
 ];
@@ -83,6 +86,7 @@ const UploadXray = () => {
   } = useAnalysis();
 
   const { selectedPatient, pendingUploadFiles, setPendingUploadFiles, pendingScanType, setPendingScanType, refreshPatients } = usePatientContext();
+  const { user } = useAuth();
 
   const [tempFiles, setTempFiles] = useState<File[]>([]);
   const [tempPreviews, setTempPreviews] = useState<string[]>([]);
@@ -93,9 +97,11 @@ const UploadXray = () => {
 
   // NEW: State to track which scan type the user selected
   const [scanType, setScanType] = useState<ScanType>('auto');
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const displayFile = uploadedFile || tempFiles[0];
   const displayUrl = previewUrl || tempPreviews[0];
+  const isCtStudyStaged = scanType === 'ct' && currentStep === 'idle' && tempFiles.length > 0 && !report;
 
   const parseReportText = (text: string | undefined): ExtendedParsedReport => {
     if (!text) {
@@ -127,12 +133,17 @@ const UploadXray = () => {
     setDragActive(e.type === "dragenter" || e.type === "dragover");
   }, []);
 
+  const openFilePicker = useCallback(() => {
+    fileInputRef.current?.click();
+  }, []);
 
-  const processFiles = useCallback(async (files: FileList | File[]) => {
+  const processFiles = useCallback(async (files: FileList | File[], requestedScanType?: ScanType) => {
     if (!selectedPatient) {
       alert("Please select a patient from the Patients dashboard first.");
       return;
     }
+
+    const effectiveScanType = requestedScanType || scanType;
 
     // Reset previous analysis state to prevent old images/reports from persisting
     resetAnalysis();
@@ -142,6 +153,10 @@ const UploadXray = () => {
 
     // Convert to array and handle previews
     const fileArray = Array.from(files);
+    if (effectiveScanType === "ct" && fileArray.length > CT_MAX_UPLOAD_FILES) {
+      toast.error(`CT uploads are limited to ${CT_MAX_UPLOAD_FILES} slices per study.`);
+      return;
+    }
     const newPreviews = fileArray.map(f => URL.createObjectURL(f));
     setTempFiles(fileArray);
     setTempPreviews(newPreviews);
@@ -153,7 +168,7 @@ const UploadXray = () => {
     const formData = new FormData();
     fileArray.forEach(f => formData.append("files", f));
     // NEW: Send the selected scan type to the backend
-    formData.append("scan_type", scanType);
+    formData.append("scan_type", effectiveScanType);
 
     try {
       setCurrentStep('analyzing');
@@ -171,191 +186,254 @@ const UploadXray = () => {
       const decoder = new TextDecoder();
       let buffer = "";
       let finishedSuccessfully = false;
+      let finalReportData: any = null;
 
       while (true) {
         const { done, value } = await reader.read();
+
+        // Always decode any bytes returned with this read — even when done=true
+        // the browser may deliver the final chunk simultaneously with the EOF signal.
+        if (value) {
+          buffer += decoder.decode(value, { stream: !done });
+        }
+
+        // Process all complete newline-delimited JSON lines in the buffer
+        const processBuffer = () => {
+          const lines = buffer.split("\n");
+          // Keep the last (possibly incomplete) fragment in the buffer
+          buffer = lines.pop() || "";
+
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            try {
+              const data = JSON.parse(line);
+              const currentSteps = getAgentSteps(effectiveScanType);
+
+              const updateStepInfo = (stepId: string) => {
+                const idx = currentSteps.findIndex(s => s.id === stepId);
+                if (idx !== -1) {
+                  setActiveAgentIndex(idx);
+                  setProgress(currentSteps[idx].progress);
+                }
+              };
+
+              if (data.status === "vision_start") updateStepInfo("vision");
+              else if (data.status === "draft_start") updateStepInfo("draft");
+              else if (data.status === "kg_start") updateStepInfo("kg");
+              else if (data.status === "synthesis_start") updateStepInfo("synthesis");
+              else if (data.status === "error") {
+                alert(data.message);
+                setTempFiles([]);
+                setTempPreviews([]);
+                setCurrentStep('idle');
+                setProgress(0);
+                return true; // Signal caller to stop
+              }
+              else if (data.status === "complete") {
+                finishedSuccessfully = true;
+                finalReportData = data;
+              }
+            } catch (e) {
+              console.error("Error processing stream line", e, line);
+            }
+          }
+          return false;
+        };
+
+        if (processBuffer()) return; // error chunk triggered early exit
+
         if (done) {
+          // Flush any remaining buffer content that arrived without a trailing newline
+          if (buffer.trim()) {
+            try {
+              const data = JSON.parse(buffer);
+              if (data.status === "complete") {
+                finishedSuccessfully = true;
+                finalReportData = data;
+              }
+            } catch (e) {
+              console.error("Error parsing final buffer remainder", e, buffer);
+            }
+          }
+
           if (!finishedSuccessfully) {
             throw new Error("The backend server disconnected prematurely before finishing the analysis.");
           }
           break;
         }
+      }
 
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
+      // Perform all Supabase operations AFTER the stream is fully read and closed
+      if (finalReportData) {
+        const data = finalReportData;
+        const parsedReport = parseReportText(data.final_report);
+        const persistedScanType = data.detected_modality || (effectiveScanType === "auto" ? "unknown" : effectiveScanType);
 
-        for (const line of lines) {
-          if (!line.trim()) continue;
-          try {
-            const data = JSON.parse(line);
-            const currentSteps = getAgentSteps(scanType);
+        let insertedScanId: string | null = null;
+        try {
+          if (!user) throw new Error("Not authenticated");
+          console.log("[UploadXray] User obtained from context:", user.id);
 
-            const updateStepInfo = (stepId: string) => {
-              const idx = currentSteps.findIndex(s => s.id === stepId);
-              if (idx !== -1) {
-                setActiveAgentIndex(idx);
-                setProgress(currentSteps[idx].progress);
-              }
-            };
+          const now = new Date().toISOString();
+          const fileExt = fileArray[0].name.split('.').pop() || 'png';
+          const baseFileName = `${selectedPatient.id}_${now}`.replace(/[:.]/g, '-');
+          const heatFileName = `${baseFileName}_heatmap.png`;
+          const refFileName = `${baseFileName}_reference.png`;
 
-            if (data.status === "vision_start") updateStepInfo("vision");
-            else if (data.status === "draft_start") updateStepInfo("draft");
-            else if (data.status === "kg_start") updateStepInfo("kg");
-            else if (data.status === "synthesis_start") updateStepInfo("synthesis");
-            else if (data.status === "error") {
-              alert(data.message);
-              setTempFiles([]);
-              setTempPreviews([]);
-              setCurrentStep('idle');
-              setProgress(0);
-              return; // Stop processing
+          let original_image_url: string | null = null;
+          let heatmap_image_url: string | null = null;
+          let explainability_reference_image_url: string | null = null;
+
+          // 1. Upload ALL original images
+          const uploadedUrls: string[] = [];
+          for (let i = 0; i < fileArray.length; i++) {
+            const currentFile = fileArray[i];
+            const currentFileExt = currentFile.name.split('.').pop() || 'png';
+            const origFileName = `${baseFileName}_${i}.${currentFileExt}`;
+
+            console.log(`[UploadXray] Uploading original image ${i}...`);
+            const { data: origData, error: origErr } = await supabase.storage
+              .from('medical-images')
+              .upload(`${user.id}/${origFileName}`, currentFile);
+
+            if (origErr) {
+              throw new Error(`Failed to upload scan image ${i + 1}: ${origErr.message}`);
             }
-            else if (data.status === "complete") {
-              finishedSuccessfully = true;
-              const parsedReport = parseReportText(data.final_report);
-              const persistedScanType = data.detected_modality || (scanType === "auto" ? "unknown" : scanType);
 
-              // Safety timeout wrapper
-              const withTimeout = async (promise: any, ms = 10000): Promise<any> => {
-                return Promise.race([
-                  Promise.resolve(promise),
-                  new Promise((_, reject) => setTimeout(() => reject(new Error("Supabase request timed out")), ms))
-                ]);
-              };
-
-              // Now save to Supabase BEFORE setting state
-              let insertedScanId: string | null = null;
-              try {
-                // Get Auth User ID since RLS requires user_id
-                console.log("[UploadXray] Fetching user...");
-                const { data: { user } } = await withTimeout(supabase.auth.getUser());
-                if (!user) throw new Error("Not authenticated");
-                console.log("[UploadXray] User fetched:", user.id);
-
-
-                const now = new Date().toISOString();
-                const fileExt = fileArray[0].name.split('.').pop() || 'png';
-                const baseFileName = `${selectedPatient.id}_${now}`.replace(/[:.]/g, '-');
-                const heatFileName = `${baseFileName}_heatmap.png`;
-
-                let original_image_url: string | null = null;
-                let heatmap_image_url: string | null = null;
-
-                // 1. Upload ALL original images
-                const uploadedUrls: string[] = [];
-                for (let i = 0; i < fileArray.length; i++) {
-                  const currentFile = fileArray[i];
-                  const currentFileExt = currentFile.name.split('.').pop() || 'png';
-                  const origFileName = `${baseFileName}_${i}.${currentFileExt}`;
-
-                  console.log(`[UploadXray] Uploading original image ${i}...`);
-                  const { data: origData, error: origErr } = await withTimeout(supabase.storage
-                    .from('medical-images')
-                    .upload(`${user.id}/${origFileName}`, currentFile));
-
-
-                  if (origErr) {
-                    throw new Error(`Failed to upload scan image ${i + 1}: ${origErr.message}`);
-                  }
-
-                  if (!origErr && origData) {
-                    const { data: pubOrig } = supabase.storage
-                      .from('medical-images')
-                      .getPublicUrl(`${user.id}/${origFileName}`);
-                    uploadedUrls.push(pubOrig.publicUrl);
-                  }
-                }
-
-                if (uploadedUrls.length > 0) {
-                  original_image_url = uploadedUrls.join(',');
-                }
-
-                // 2. Upload heatmap if we have one
-                if (data.heatmap) {
-                  console.log("[UploadXray] Converting heatmap base64 to blob...");
-                  const fetchResponse = await fetch(data.heatmap);
-                  const blob = await fetchResponse.blob();
-
-                  console.log("[UploadXray] Uploading heatmap image...");
-                  const { data: heatData, error: heatErr } = await withTimeout(supabase.storage
-                    .from('medical-images')
-                    .upload(`${user.id}/${heatFileName}`, blob));
-
-
-                  if (heatErr) {
-                    console.warn("Heatmap upload failed:", heatErr.message);
-                  }
-
-                  if (!heatErr && heatData) {
-                    const { data: pubHeat } = supabase.storage
-                      .from('medical-images')
-                      .getPublicUrl(`${user.id}/${heatFileName}`);
-                    heatmap_image_url = pubHeat.publicUrl;
-                  }
-                }
-
-                // 3. Insert into medical_scans
-                let severity = 'moderate';
-                const lowerImpression = parsedReport.impression.toLowerCase();
-                const lowerFindings = parsedReport.findings.toLowerCase();
-                if (lowerImpression.includes('normal') || lowerFindings.includes('unremarkable')) severity = 'mild';
-                if (lowerImpression.includes('severe') || lowerImpression.includes('critical')) severity = 'severe';
-
-                console.log("[UploadXray] Inserting into medical_scans...");
-                const { data: insertedScan, error: insertErr } = await withTimeout(supabase.from('medical_scans').insert([{
-                  patient_id: selectedPatient.id,
-                  user_id: user.id,
-                  scan_type: persistedScanType,
-                  original_image_url,
-                  heatmap_image_url,
-                  findings: parsedReport.findings,
-                  impression: parsedReport.impression,
-                  recommendation: parsedReport.recommendation || null,
-                  labels: parsedReport.labels,
-                  kg_data: data.knowledge_graph || null,
-                  severity
-                }]).select('id').single());
-
-
-                if (insertErr) {
-                  throw new Error(`Failed to save report to database: ${insertErr.message}`);
-                }
-
-                if (insertedScan?.id) {
-                  insertedScanId = insertedScan.id;
-                  console.log("[UploadXray] Updating patient timestamp...");
-                  await withTimeout(supabase
-                    .from('patients')
-                    .update({ updated_at: now })
-                    .eq('id', selectedPatient.id));
-
-                  console.log("[UploadXray] Refreshing patients list...");
-                  if (refreshPatients) {
-                    await withTimeout(refreshPatients());
-                  }
-                  toast.success("Report saved to patient history.");
-                }
-              } catch (dbError) {
-                console.error("Database Save Error:", dbError);
-                toast.error(dbError instanceof Error ? dbError.message : "Analysis completed, but saving failed.");
-              }
-
-              // Update UI with results
-              setAnalysisResults(fileArray[0], newPreviews[0], parsedReport, data.knowledge_graph, data.heatmap);
-              if (insertedScanId) {
-                setCurrentScanId(insertedScanId);
-              }
-              setTempFiles([]);
-              setTempPreviews([]);
-              setProgress(100);
-              setCurrentStep('complete');
+            if (!origErr && origData) {
+              const { data: pubOrig } = supabase.storage
+                .from('medical-images')
+                .getPublicUrl(`${user.id}/${origFileName}`);
+              uploadedUrls.push(pubOrig.publicUrl);
             }
-          } catch (e) {
-            console.error("Error processing stream line", e, line);
-            alert(`Error processing backend response: ${e instanceof Error ? e.message : 'Unknown error'}`);
           }
+
+          if (uploadedUrls.length > 0) {
+            original_image_url = uploadedUrls.join(',');
+          }
+
+          const sourceImages = uploadedUrls.map((url, index) => ({
+            url,
+            filename: fileArray[index]?.name || `view_${index + 1}`,
+            order: index + 1,
+          }));
+
+          // 2. Upload heatmap if we have one
+          if (data.heatmap) {
+            console.log("[UploadXray] Converting heatmap base64 to blob...");
+            const fetchResponse = await fetch(data.heatmap);
+            const blob = await fetchResponse.blob();
+
+            console.log("[UploadXray] Uploading heatmap image...");
+            const { data: heatData, error: heatErr } = await supabase.storage
+              .from('medical-images')
+              .upload(`${user.id}/${heatFileName}`, blob);
+
+            if (heatErr) {
+              console.warn("Heatmap upload failed:", heatErr.message);
+            }
+
+            if (!heatErr && heatData) {
+              const { data: pubHeat } = supabase.storage
+                .from('medical-images')
+                .getPublicUrl(`${user.id}/${heatFileName}`);
+              heatmap_image_url = pubHeat.publicUrl;
+            }
+          }
+
+          if (data.reference_image) {
+            console.log("[UploadXray] Converting explainability reference image to blob...");
+            const fetchResponse = await fetch(data.reference_image);
+            const blob = await fetchResponse.blob();
+
+            console.log("[UploadXray] Uploading explainability reference image...");
+            const { data: refData, error: refErr } = await supabase.storage
+              .from('medical-images')
+              .upload(`${user.id}/${refFileName}`, blob);
+
+            if (refErr) {
+              console.warn("Reference montage upload failed:", refErr.message);
+            }
+
+            if (!refErr && refData) {
+              const { data: pubRef } = supabase.storage
+                .from('medical-images')
+                .getPublicUrl(`${user.id}/${refFileName}`);
+              explainability_reference_image_url = pubRef.publicUrl;
+            }
+          }
+
+          // 3. Insert into medical_scans
+          let severity = 'moderate';
+          const lowerImpression = parsedReport.impression.toLowerCase();
+          const lowerFindings = parsedReport.findings.toLowerCase();
+          if (lowerImpression.includes('normal') || lowerFindings.includes('unremarkable')) severity = 'mild';
+          if (lowerImpression.includes('severe') || lowerImpression.includes('critical')) severity = 'severe';
+
+          console.log("[UploadXray] Inserting into medical_scans...");
+          const { data: insertedScan, error: insertErr } = await supabase.from('medical_scans').insert([{
+            patient_id: selectedPatient.id,
+            user_id: user.id,
+            scan_type: persistedScanType,
+            original_image_url,
+            source_images: sourceImages,
+            heatmap_image_url,
+            explainability_reference_image_url,
+            findings: parsedReport.findings,
+            impression: parsedReport.impression,
+            recommendation: parsedReport.recommendation || null,
+            labels: parsedReport.labels,
+            kg_data: data.knowledge_graph || null,
+            scan_metadata: {
+              upload_count: fileArray.length,
+              explainability_mode: persistedScanType === "ct" ? "montage_cells" : "region_overlay",
+              ct_montage: data.knowledge_graph?.metadata?.ct_montage || null,
+              selected_slice_count: data.knowledge_graph?.metadata?.ct_montage?.selected_slice_count || null,
+            },
+            severity
+          }]).select('id').single();
+
+          if (insertErr) {
+            throw new Error(`Failed to save report to database: ${insertErr.message}`);
+          }
+
+          if (insertedScan?.id) {
+            insertedScanId = insertedScan.id;
+            console.log("[UploadXray] Updating patient timestamp...");
+            await supabase
+              .from('patients')
+              .update({ updated_at: now })
+              .eq('id', selectedPatient.id);
+
+            console.log("[UploadXray] Refreshing patients list...");
+            if (refreshPatients) {
+              await refreshPatients();
+            }
+            toast.success("Report saved to patient history.");
+          }
+        } catch (dbError) {
+          console.error("Database Save Error:", dbError);
+          toast.error(dbError instanceof Error ? dbError.message : "Analysis completed, but saving failed.");
         }
+
+        // Update UI with results
+        setAnalysisResults(
+          fileArray[0],
+          newPreviews[0],
+          parsedReport,
+          data.knowledge_graph,
+          data.heatmap,
+          data.detected_modality || null,
+          data.explainability || null,
+          data.reference_image || null,
+        );
+        if (insertedScanId) {
+          setCurrentScanId(insertedScanId);
+        }
+        setTempFiles([]);
+        setTempPreviews([]);
+        setProgress(100);
+        setCurrentStep('complete');
       }
     } catch (error) {
       console.error("Error:", error);
@@ -366,19 +444,63 @@ const UploadXray = () => {
       setCurrentStep('idle');
       setProgress(0);
     }
-  }, [setAnalysisResults, setCurrentScanId, tempPreviews, scanType, selectedPatient, refreshPatients]);
+  }, [setAnalysisResults, setCurrentScanId, tempPreviews, scanType, selectedPatient, refreshPatients, user]);
+
+  const stageFilesForCt = useCallback((files: FileList | File[], requestedScanType?: ScanType, append = false) => {
+    if (!selectedPatient) {
+      alert("Please select a patient from the Patients dashboard first.");
+      return;
+    }
+
+    const effectiveScanType = requestedScanType || scanType;
+    const incomingFiles = Array.from(files);
+    if (!incomingFiles.length) return;
+
+    if (effectiveScanType !== "ct") {
+      processFiles(incomingFiles, effectiveScanType);
+      return;
+    }
+
+    resetAnalysis();
+
+    const mergedFiles = append ? [...tempFiles, ...incomingFiles] : incomingFiles;
+    if (mergedFiles.length > CT_MAX_UPLOAD_FILES) {
+      toast.error(`CT uploads are limited to ${CT_MAX_UPLOAD_FILES} slices per study.`);
+      return;
+    }
+
+    tempPreviews.forEach((preview) => URL.revokeObjectURL(preview));
+    const mergedPreviews = mergedFiles.map((file) => URL.createObjectURL(file));
+
+    setTempFiles(mergedFiles);
+    setTempPreviews(mergedPreviews);
+    setCurrentStep('idle');
+    setProgress(0);
+    setActiveAgentIndex(0);
+  }, [processFiles, resetAnalysis, scanType, selectedPatient, tempFiles, tempPreviews]);
+
+  const handleQueuedFileSelection = useCallback((files: FileList | File[]) => {
+    stageFilesForCt(files, scanType, tempFiles.length > 0);
+  }, [scanType, stageFilesForCt, tempFiles.length]);
 
   // AUTO-TRIGGER: When coming from Patient Dashboard via Upload Scan button
   useEffect(() => {
     if (pendingUploadFiles && pendingUploadFiles.length > 0) {
       // 1. Set the scan type from the dialog selection BEFORE processing
-      setScanType(pendingScanType as ScanType);
+      const requestedScanType = pendingScanType as ScanType;
+      setScanType(requestedScanType);
       // 2. Clear from context so it doesn't re-fire on re-render
       const files = pendingUploadFiles;
       setPendingUploadFiles(null);
       setPendingScanType('auto');
-      // 3. Small delay so the state update settles, then fire
-      setTimeout(() => processFiles(files), 50);
+      // 3. CT studies should stage first; X-rays can still process immediately.
+      setTimeout(() => {
+        if (requestedScanType === 'ct') {
+          stageFilesForCt(files, requestedScanType);
+        } else {
+          processFiles(files, requestedScanType);
+        }
+      }, 50);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingUploadFiles]); // Run when pending files are detected
@@ -392,9 +514,9 @@ const UploadXray = () => {
     setCurrentStep('idle');
     setProgress(0);
     setActiveAgentIndex(0);
-    // Reset file input value so selecting the same file again triggers onChange
-    const fileInput = document.getElementById('file-input') as HTMLInputElement;
-    if (fileInput) fileInput.value = "";
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
   }, [resetAnalysis, tempPreviews]);
 
   const extendedReport = report as ExtendedParsedReport | null;
@@ -641,9 +763,9 @@ const UploadXray = () => {
                         onDragOver={selectedPatient ? handleDrag : undefined}
                         onDrop={selectedPatient ? ((e) => {
                           e.preventDefault();
-                          if (e.dataTransfer.files?.length > 0) processFiles(e.dataTransfer.files);
+                          if (e.dataTransfer.files?.length > 0) handleQueuedFileSelection(e.dataTransfer.files);
                         }) : undefined}
-                        onClick={selectedPatient ? (() => document.getElementById('file-input')?.click()) : undefined}
+                        onClick={selectedPatient ? openFilePicker : undefined}
                       >
                         <input
                           id="file-input"
@@ -651,8 +773,14 @@ const UploadXray = () => {
                           className="hidden"
                           accept="image/*"
                           multiple
+                          ref={fileInputRef}
                           disabled={!selectedPatient}
-                          onChange={(e) => e.target.files?.length && processFiles(e.target.files)}
+                          onChange={(e) => {
+                            if (e.target.files?.length) {
+                              handleQueuedFileSelection(e.target.files);
+                            }
+                            e.currentTarget.value = "";
+                          }}
                         />
                         <div className="text-center">
                           <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10 text-primary shadow-sm">
@@ -662,11 +790,14 @@ const UploadXray = () => {
                           <p className="text-sm text-muted-foreground mt-1">
                             {!selectedPatient ? "Select a patient first to unlock" : "Drag & drop or click to browse"}
                           </p>
-                          <div className="mt-5 flex justify-center gap-2 text-xs text-muted-foreground">
+                    <div className="mt-5 flex justify-center gap-2 text-xs text-muted-foreground">
                             <span className="medical-chip">X-ray</span>
                             <span className="medical-chip">CT</span>
                             <span className="medical-chip">Multi-image</span>
                           </div>
+                          <p className="mt-3 text-xs text-muted-foreground">
+                            CT studies can include up to {CT_MAX_UPLOAD_FILES} uploaded slices. The CT model samples up to {CT_MODEL_SLICE_COUNT} representative slices into one montage for inference and explainability.
+                          </p>
                         </div>
                       </div>
                     </>
@@ -683,12 +814,37 @@ const UploadXray = () => {
                           </div>
                         )}
                       </div>
+                      {isCtStudyStaged && (
+                        <div className="mb-4 rounded-[22px] border border-primary/20 bg-primary/5 p-4">
+                          <p className="text-sm font-semibold text-foreground">CT study staged for review</p>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {tempFiles.length} slice{tempFiles.length === 1 ? "" : "s"} queued. Add more slices or start analysis when the study is ready.
+                          </p>
+                        </div>
+                      )}
                       <div className="flex justify-between items-center text-sm">
                         <span className="truncate max-w-[200px]">{displayFile.name}</span>
                         <div className="flex gap-2">
+                          {tempFiles.length > 1 && (
+                            <span className="px-2 py-1 bg-muted rounded text-xs uppercase font-bold flex items-center">
+                              {tempFiles.length} files
+                            </span>
+                          )}
                           <span className="px-2 py-1 bg-muted rounded text-xs uppercase font-bold flex items-center">
                             Mode: {scanType}
                           </span>
+                          {isCtStudyStaged && (
+                            <>
+                              <Button variant="outline" size="sm" onClick={openFilePicker}>
+                                <Upload className="w-3 h-3 mr-1" />
+                                Add slices
+                              </Button>
+                              <Button size="sm" onClick={() => processFiles(tempFiles, 'ct')}>
+                                <Brain className="w-3 h-3 mr-1" />
+                                Analyze CT Study
+                              </Button>
+                            </>
+                          )}
                           <Button variant="ghost" size="sm" onClick={handleReset} disabled={currentStep === 'analyzing'}>
                             <RefreshCw className={cn("w-3 h-3 mr-1", currentStep === 'analyzing' && "animate-spin")} />
                             {currentStep === 'analyzing' ? 'Busy...' : 'Reset'}

@@ -81,3 +81,4 @@ env/
 
 backend/ngrok-v3-stable-linux-amd64.tgz
 xmedfusion-mobile/package-lock.json
+*.tgz

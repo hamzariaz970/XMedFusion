@@ -154,6 +154,42 @@ class TestExplain:
         result = self.generate_explainable_image("/nonexistent/image.png", {}, output)
         assert result is None
 
+    def test_generate_explainable_image_ct_uses_montage_metadata(self, tmp_path):
+        base = str(tmp_path / "ct_montage.png")
+        output = str(tmp_path / "ct_explained.png")
+        self._make_dummy_image(base, size=(1024, 1024))
+        ct_kg = {
+            "entities": [["nodule", "Observation"], ["lungs", "Anatomy"]],
+            "relations": [[0, 1, "located_at"]],
+            "metadata": {
+                "ct_montage": {"rows": 4, "cols": 4},
+                "report_findings": {
+                    "Nodule": {"status": "present", "slice_index": 6}
+                },
+            },
+        }
+        result = self.generate_explainable_image(base, ct_kg, output, modality="ct")
+        assert result is not None
+        assert os.path.exists(output)
+
+    def test_generate_explainable_image_ct_uses_generic_ct_highlights(self, tmp_path):
+        base = str(tmp_path / "ct_montage_generic.png")
+        output = str(tmp_path / "ct_explained_generic.png")
+        self._make_dummy_image(base, size=(1024, 1024))
+        ct_kg = {
+            "entities": [["clear", "Observation"], ["chest", "Anatomy"]],
+            "relations": [[0, 1, "modify"]],
+            "metadata": {
+                "ct_montage": {"rows": 4, "cols": 4},
+                "ct_highlights": [
+                    {"label": "Left pleural effusion", "slice_index": 7, "status": "present"}
+                ],
+            },
+        }
+        result = self.generate_explainable_image(base, ct_kg, output, modality="ct")
+        assert result is not None
+        assert os.path.exists(output)
+
 
 # ══════════════════════════════════════════════════════════════════
 # 3. DRAFT MODULE — RetrievalAgent (no LLM)
@@ -298,3 +334,95 @@ class TestConfig:
     def test_base_url_is_localhost(self):
         import config
         assert "localhost" in config.BASE_URL or "127.0.0.1" in config.BASE_URL
+
+
+class TestCTMontage:
+    def test_build_ct_montage_returns_fixed_grid(self, tmp_path):
+        from ct_montage import build_ct_montage
+
+        paths = []
+        for idx in range(5):
+            path = tmp_path / f"slice_{idx}.png"
+            Image.new("L", (64, 64), color=idx * 20).save(path)
+            paths.append(str(path))
+
+        montage, metadata = build_ct_montage(paths)
+        assert montage.size == (1024, 1024)
+        assert metadata["rows"] == 4
+        assert metadata["cols"] == 4
+        assert metadata["selected_slice_count"] == 5
+        assert len(metadata["slice_cells"]) == 16
+
+    def test_build_ct_montage_keeps_all_curated_slices_when_under_limit(self, tmp_path):
+        from ct_montage import build_ct_montage
+
+        paths = []
+        for idx in range(16):
+            path = tmp_path / f"curated_slice_{idx}.png"
+            Image.new("L", (64, 64), color=idx * 10).save(path)
+            paths.append(str(path))
+
+        _, metadata = build_ct_montage(paths)
+        populated = [cell for cell in metadata["slice_cells"] if cell["source_filename"]]
+
+        assert metadata["selected_slice_count"] == 16
+        assert len(populated) == 16
+        assert populated[0]["source_order_index"] == 1
+        assert populated[-1]["source_order_index"] == 16
+
+    def test_build_ct_montage_tracks_source_filenames_and_order(self, tmp_path):
+        from ct_montage import build_ct_montage
+
+        paths = []
+        for idx in range(10):
+            path = tmp_path / f"ct_slice_{idx}.png"
+            Image.new("L", (64, 64), color=idx * 30).save(path)
+            paths.append(str(path))
+
+        _, metadata = build_ct_montage(paths, rows=2, cols=2, tile_size=(64, 64))
+        populated_cells = [cell for cell in metadata["slice_cells"] if cell["source_filename"]]
+
+        assert metadata["source_image_count"] == 10
+        assert len(populated_cells) == 4
+        assert all(cell["source_filename"].startswith("ct_slice_") for cell in populated_cells)
+        assert all(isinstance(cell["source_order_index"], int) and cell["source_order_index"] > 0 for cell in populated_cells)
+
+
+class TestCTSynthesisGuards:
+    def test_degenerate_ct_report_detects_header_only_output(self):
+        from synthesis import _is_degenerate_ct_report
+
+        assert _is_degenerate_ct_report("FINDINGS:") is True
+        assert _is_degenerate_ct_report("FINDINGS:\n\nIMPRESSION:") is True
+
+    def test_degenerate_ct_report_allows_real_content(self):
+        from synthesis import _is_degenerate_ct_report
+
+        report = (
+            "FINDINGS: Mild bibasal atelectatic change is present [Slice 6]. "
+            "No pleural effusion.\n\n"
+            "IMPRESSION: Mild bibasal atelectatic change."
+        )
+        assert _is_degenerate_ct_report(report) is False
+
+    def test_degenerate_ct_report_detects_dangling_clause(self):
+        from synthesis import _is_degenerate_ct_report
+
+        report = "FINDINGS: Trachea, both main bronchi are open. Mediastinal vascular structures have a"
+        assert _is_degenerate_ct_report(report) is True
+
+    def test_build_kg_from_synthesis_report_uses_ct_grounding_when_terms_do_not_match_xray_labels(self):
+        from synthesis import build_kg_from_synthesis_report
+
+        kg = build_kg_from_synthesis_report(
+            "FINDINGS: Mediastinal vascular structures are prominent.\n\nIMPRESSION: Mild mediastinal prominence.",
+            {
+                "ct_grounding": [
+                    {"label": "Mediastinal vascular prominence", "slice_index": 5, "status": "present"}
+                ]
+            },
+        )
+
+        entity_texts = [entity[0] for entity in kg["entities"]]
+        assert "mediastinal vascular prominence" in entity_texts
+        assert kg["metadata"]["ct_highlights"][0]["slice_index"] == 5

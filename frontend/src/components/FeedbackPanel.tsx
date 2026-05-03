@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, type ReactNode } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAnalysis, type FeedbackStatus } from "@/context/AnalysisContext";
+import { useAuth } from "@/context/AuthContext";
 import { supabase } from "@/lib/supabaseClient";
 import { toast } from "sonner";
 
@@ -45,9 +46,47 @@ interface FeedbackPanelProps {
   onReAnalyze?: () => void;
 }
 
+interface FeedbackSectionProps {
+  id: "report" | "labels" | "kg" | "notes";
+  icon: typeof Brain;
+  title: string;
+  expanded: boolean;
+  onToggle: (id: "report" | "labels" | "kg" | "notes") => void;
+  children: ReactNode;
+}
+
+const FeedbackSection = ({
+  id,
+  icon: Icon,
+  title,
+  expanded,
+  onToggle,
+  children,
+}: FeedbackSectionProps) => (
+  <div className="overflow-hidden rounded-[22px] border border-border/50 bg-white/70">
+    <button
+      type="button"
+      onClick={() => onToggle(id)}
+      className="flex w-full items-center justify-between bg-secondary/40 px-4 py-3 transition-colors hover:bg-primary/10"
+    >
+      <span className="flex items-center gap-2 text-sm font-semibold text-foreground">
+        <Icon className="w-4 h-4 text-primary" />
+        {title}
+      </span>
+      {expanded ? (
+        <ChevronUp className="w-4 h-4 text-muted-foreground" />
+      ) : (
+        <ChevronDown className="w-4 h-4 text-muted-foreground" />
+      )}
+    </button>
+    {expanded ? <div className="space-y-3 p-4">{children}</div> : null}
+  </div>
+);
+
 // ---------- Component ----------
 const FeedbackPanel = ({ onReAnalyze }: FeedbackPanelProps) => {
-  const { report, knowledgeGraphData, currentScanId, feedbackStatus, setFeedbackStatus } = useAnalysis();
+  const { report, knowledgeGraphData, currentScanId, feedbackStatus, setFeedbackStatus, updateReport } = useAnalysis();
+  const { user } = useAuth();
 
   // Local editable state
   const [edited, setEdited] = useState<EditableReport>({
@@ -150,19 +189,9 @@ const FeedbackPanel = ({ onReAnalyze }: FeedbackPanelProps) => {
     setSaving(true);
     console.log("[handleSave] Start with status:", status);
     
-    // Safety timeout wrapper
-    const withTimeout = async (promise: any, ms = 10000): Promise<any> => {
-      return Promise.race([
-        Promise.resolve(promise),
-        new Promise((_, reject) => setTimeout(() => reject(new Error("Request timed out")), ms))
-      ]);
-    };
-
     try {
-      console.log("[handleSave] Fetching user...");
-      const { data: { user } } = await withTimeout(supabase.auth.getUser());
       if (!user) throw new Error("Not authenticated");
-      console.log("[handleSave] User fetched:", user.id);
+      console.log("[handleSave] User obtained from context:", user.id);
 
       const reviewedKg = buildReviewedKnowledgeGraph();
       console.log("[handleSave] KG built successfully");
@@ -182,7 +211,7 @@ const FeedbackPanel = ({ onReAnalyze }: FeedbackPanelProps) => {
 
       if (currentScanId) {
         console.log("[handleSave] Updating medical_scans for ID:", currentScanId);
-        const { error: scanUpdateError } = await withTimeout(supabase
+        const { error: scanUpdateError } = await supabase
           .from("medical_scans")
           .update({
             findings: edited.findings,
@@ -192,14 +221,21 @@ const FeedbackPanel = ({ onReAnalyze }: FeedbackPanelProps) => {
             kg_data: reviewedKg || knowledgeGraphData || null,
           })
           .eq("id", currentScanId)
-          .eq("user_id", user.id));
+          .eq("user_id", user.id);
 
         console.log("[handleSave] Update finished, error:", scanUpdateError);
         if (scanUpdateError) throw scanUpdateError;
       }
 
+      updateReport({
+        findings: edited.findings,
+        impression: edited.impression,
+        recommendation: edited.recommendation,
+        labels: edited.labels,
+      });
+
       console.log("[handleSave] Inserting into feedback...");
-      const { error } = await withTimeout(supabase.from("feedback").insert(payload));
+      const { error } = await supabase.from("feedback").insert(payload);
       console.log("[handleSave] Insert finished, error:", error);
       if (error) {
         console.warn("Feedback audit insert skipped:", error.message);
@@ -240,37 +276,6 @@ const FeedbackPanel = ({ onReAnalyze }: FeedbackPanelProps) => {
 
   if (!report) return null;
 
-  // --- Render Collapsible Section ---
-  const Section = ({
-    id,
-    icon: Icon,
-    title,
-    children,
-  }: {
-    id: keyof typeof expandedSections;
-    icon: any;
-    title: string;
-    children: React.ReactNode;
-  }) => (
-    <div className="overflow-hidden rounded-[22px] border border-border/50 bg-white/70">
-      <button
-        onClick={() => toggleSection(id)}
-        className="flex w-full items-center justify-between bg-secondary/40 px-4 py-3 transition-colors hover:bg-primary/10"
-      >
-        <span className="flex items-center gap-2 text-sm font-semibold text-foreground">
-          <Icon className="w-4 h-4 text-primary" />
-          {title}
-        </span>
-        {expandedSections[id] ? (
-          <ChevronUp className="w-4 h-4 text-muted-foreground" />
-        ) : (
-          <ChevronDown className="w-4 h-4 text-muted-foreground" />
-        )}
-      </button>
-      {expandedSections[id] && <div className="p-4 space-y-3">{children}</div>}
-    </div>
-  );
-
   return (
     <Card className="surface-card border-primary/20 shadow-xl animate-in fade-in slide-in-from-bottom-4 duration-500 backdrop-blur">
       <div className="h-1 bg-gradient-to-r from-primary via-blue-300 to-primary" />
@@ -286,7 +291,13 @@ const FeedbackPanel = ({ onReAnalyze }: FeedbackPanelProps) => {
 
       <CardContent className="space-y-4">
         {/* ── Report Text Sections ─────────── */}
-        <Section id="report" icon={Brain} title="Report Content">
+        <FeedbackSection
+          id="report"
+          icon={Brain}
+          title="Report Content"
+          expanded={expandedSections.report}
+          onToggle={toggleSection}
+        >
           <div>
             <label className="text-xs font-bold uppercase text-muted-foreground mb-1.5 block">
               Findings
@@ -320,10 +331,16 @@ const FeedbackPanel = ({ onReAnalyze }: FeedbackPanelProps) => {
               className="bg-white/70 text-sm leading-relaxed resize-y"
             />
           </div>
-        </Section>
+        </FeedbackSection>
 
         {/* ── Labels ───────────────────────── */}
-        <Section id="labels" icon={Tag} title="Diagnosis Labels">
+        <FeedbackSection
+          id="labels"
+          icon={Tag}
+          title="Diagnosis Labels"
+          expanded={expandedSections.labels}
+          onToggle={toggleSection}
+        >
           <div className="flex flex-wrap gap-2">
             {edited.labels.map((label, i) => (
               <Badge
@@ -352,11 +369,17 @@ const FeedbackPanel = ({ onReAnalyze }: FeedbackPanelProps) => {
               <Plus className="w-3 h-3" /> Add
             </Button>
           </div>
-        </Section>
+        </FeedbackSection>
 
         {/* ── KG Entities ──────────────────── */}
         {entities.length > 0 && (
-          <Section id="kg" icon={Network} title={`Knowledge Graph Entities (${entities.length})`}>
+          <FeedbackSection
+            id="kg"
+            icon={Network}
+            title={`Knowledge Graph Entities (${entities.length})`}
+            expanded={expandedSections.kg}
+            onToggle={toggleSection}
+          >
             <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
               {entities.map((ent, i) => (
                 <div
@@ -401,11 +424,17 @@ const FeedbackPanel = ({ onReAnalyze }: FeedbackPanelProps) => {
                 </div>
               ))}
             </div>
-          </Section>
+          </FeedbackSection>
         )}
 
         {/* ── Doctor Notes ─────────────────── */}
-        <Section id="notes" icon={MessageSquarePlus} title="Doctor Notes">
+        <FeedbackSection
+          id="notes"
+          icon={MessageSquarePlus}
+          title="Doctor Notes"
+          expanded={expandedSections.notes}
+          onToggle={toggleSection}
+        >
           <Textarea
             value={doctorNotes}
             onChange={(e) => setDoctorNotes(e.target.value)}
@@ -413,7 +442,7 @@ const FeedbackPanel = ({ onReAnalyze }: FeedbackPanelProps) => {
             placeholder="Additional clinical context, corrections rationale, or observations..."
             className="bg-white/70 text-sm resize-y"
           />
-        </Section>
+        </FeedbackSection>
 
         {/* ── Action Buttons ───────────────── */}
         <div className="flex flex-col sm:flex-row gap-3 pt-2">

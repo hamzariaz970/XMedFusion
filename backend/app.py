@@ -16,22 +16,120 @@ import config
 import subprocess
 import time
 import requests
-
-# <--- NEW IMPORTS --->
-from xray_filter import classify_scan
-
-# Import agents and dependencies
-from synthesis import (
-    LocalSynthesisAgent,
-    RetrievalAgent,
-    LocalLLMReportAgent,
-    VisualDescriptionAgent,
-    reports_dict,
-    vision_encoder,
-)
+import threading
+from functools import lru_cache
 
 # --- GLOBAL AGENT STORE ---
 agents = {}
+_ai_runtime = None
+_ai_runtime_lock = threading.Lock()
+_ai_warmup_started = False
+_ai_warmup_complete = False
+_ai_warmup_error = None
+_optional_model_status = {}
+PRELOAD_ALL_MODELS_ON_STARTUP = os.getenv("PRELOAD_ALL_MODELS_ON_STARTUP", "0").strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _load_ai_runtime():
+    """
+    Import the heavy synthesis stack on demand.
+    Importing synthesis pulls in BioMedCLIP, classifier weights, filter weights,
+    and the cached report corpus, so keep it off the startup critical path.
+    """
+    global _ai_runtime
+    if _ai_runtime is not None:
+        return _ai_runtime
+
+    with _ai_runtime_lock:
+        if _ai_runtime is not None:
+            return _ai_runtime
+
+        from synthesis import (
+            LocalSynthesisAgent,
+            RetrievalAgent,
+            LocalLLMReportAgent,
+            VisualDescriptionAgent,
+            reports_dict,
+            vision_encoder,
+            warm_optional_models,
+        )
+
+        _ai_runtime = {
+            "LocalSynthesisAgent": LocalSynthesisAgent,
+            "RetrievalAgent": RetrievalAgent,
+            "LocalLLMReportAgent": LocalLLMReportAgent,
+            "VisualDescriptionAgent": VisualDescriptionAgent,
+            "reports_dict": reports_dict,
+            "vision_encoder": vision_encoder,
+            "warm_optional_models": warm_optional_models,
+        }
+        return _ai_runtime
+
+
+def _ensure_report_agents(*, preload_optional_models=False):
+    """
+    Lazily build long-lived report agents once per process.
+    This keeps `python app.py` fast while still reusing models and Ollama clients
+    across requests after the first initialization.
+    """
+    runtime = _load_ai_runtime()
+    if agents:
+        return runtime
+
+    with _ai_runtime_lock:
+        if agents:
+            return runtime
+
+        device = runtime["vision_encoder"].device
+        print(f"\n🤖 Initializing report pipeline on {device}...")
+
+        retrieval = runtime["RetrievalAgent"](runtime["vision_encoder"], k=3)
+        agents["retrieval"] = retrieval
+        agents["draft"] = runtime["LocalLLMReportAgent"]()
+        agents["vision"] = runtime["VisualDescriptionAgent"]()
+        agents["synthesis"] = runtime["LocalSynthesisAgent"]()
+
+        try:
+            retrieval._ensure_text_features()
+        except Exception as exc:
+            print(f"⚠️ Retrieval text feature warmup skipped: {exc}")
+
+        global _optional_model_status
+        if preload_optional_models:
+            _optional_model_status = runtime["warm_optional_models"]()
+
+        print("✅ Report pipeline initialized.")
+        return runtime
+
+
+def _warm_ai_stack():
+    global _ai_warmup_started, _ai_warmup_complete, _ai_warmup_error
+    if _ai_warmup_started:
+        return
+    _ai_warmup_started = True
+    try:
+        _ensure_report_agents(preload_optional_models=PRELOAD_ALL_MODELS_ON_STARTUP)
+        _ai_warmup_complete = True
+    except Exception as exc:
+        _ai_warmup_error = str(exc)
+        print(f"⚠️ Background AI warmup failed: {exc}")
+
+
+@lru_cache(maxsize=1)
+def _get_explain_llm():
+    from langchain_community.chat_models import ChatOllama
+
+    model_name = config.OLLAMA_MODEL
+    if model_name.startswith("ollama/"):
+        model_name = model_name.split("/", 1)[1]
+
+    return ChatOllama(
+        model=model_name,
+        temperature=config.TEMPERATURE,
+        num_ctx=config.CONTEXT_WINDOW,
+        base_url=config.BASE_URL,
+        keep_alive=3600,
+    )
 
 # --- LIFESPAN MANAGER ---
 def check_and_start_ollama():
@@ -95,16 +193,14 @@ async def lifespan(app: FastAPI):
     print("🧹 Memory cleaned before startup...")
     
     check_and_start_ollama()
-    
-    device = vision_encoder.device
-    print(f"\n🚀 STARTUP: Loading AI Models on {device}...")
-    
-    agents["retrieval"] = RetrievalAgent(vision_encoder, k=3)
-    agents["draft"] = LocalLLMReportAgent()
-    agents["vision"] = VisualDescriptionAgent()
-    agents["synthesis"] = LocalSynthesisAgent()
-    
-    print("✅ All AI Agents Ready! Server is listening.")
+    if PRELOAD_ALL_MODELS_ON_STARTUP:
+        print("🚀 STARTUP: Preloading X-ray, ensemble, and CT models before serving requests...")
+        _warm_ai_stack()
+        print("✅ Startup model preload complete. Server is listening.")
+    else:
+        print("🚀 STARTUP: Server ready. Warming AI pipeline in the background...")
+        threading.Thread(target=_warm_ai_stack, daemon=True).start()
+
     yield
     print("🛑 Shutting down...")
 
@@ -118,6 +214,7 @@ app.add_middleware(
 )
 
 UPLOAD_DIR = "uploads"
+CT_MAX_UPLOAD_FILES = int(os.getenv("CT_MAX_UPLOAD_FILES", "64"))
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 
@@ -127,6 +224,14 @@ async def synthesize_report(
     # Optional frontend parameter: "xray", "ct", or "auto"
     scan_type: str = Form("auto") 
 ):
+    if len(files) > CT_MAX_UPLOAD_FILES:
+        async def too_many_ct_files():
+            yield json.dumps({
+                "status": "error",
+                "message": f"Upload limit exceeded. Upload up to {CT_MAX_UPLOAD_FILES} images per study."
+            }) + "\n"
+        return StreamingResponse(too_many_ct_files(), media_type="application/x-ndjson")
+
     image_paths = []
     
     # 1. Save all uploaded files to disk
@@ -139,51 +244,13 @@ async def synthesize_report(
             
         image_paths.append(image_path)
 
-    # 2. VALIDATE: Distinguish between X-Rays, CTs, and Invalid
-    # We will validate based on the FIRST image out of the batch to save time.
-    try:
-        if len(image_paths) > 0:
-            if scan_type != "auto":
-                print(f"User explicitly selected scan_type: {scan_type}. Bypassing AI filter.")
-                detected_modality = scan_type
-                confidence = 1.0 # Forced confidence
-            else:
-                primary_image = image_paths[0]
-                detected_modality, confidence = classify_scan(primary_image)
-            
-            # 1. Is it entirely invalid?
-            if detected_modality == "invalid":
-                for path in image_paths:
-                    if os.path.exists(path):
-                        os.remove(path)
-                async def error_stream_invalid():
-                    yield json.dumps({
-                        "status": "error", 
-                        "message": f"Validation Failed: The primary image does not appear to be a medical scan (Confidence: {confidence:.1%})."
-                    }) + "\n"
-                return StreamingResponse(error_stream_invalid(), media_type="application/x-ndjson")
-                
-            # 2. Does the detected scan match what the frontend expected?
-            if scan_type == "auto" and detected_modality not in ["xray", "ct"]: # Just an additional safety net
-                for path in image_paths:
-                    if os.path.exists(path):
-                        os.remove(path)
-                async def error_stream_mismatch():
-                    yield json.dumps({
-                        "status": "error", 
-                        "message": f"Validation Failed: The detected scan type ({detected_modality}) is not supported."
-                    }) + "\n"
-                return StreamingResponse(error_stream_mismatch(), media_type="application/x-ndjson")
-
-    except Exception as e:
-        print(f"⚠️ Validation error: {e}")
-
-    # 3. Process Valid Scans
+    # 2. Process scans through the shared report pipeline.
+    runtime = await asyncio.to_thread(_ensure_report_agents)
     report_generator = agents["synthesis"].generate_final_report(
         draft_agent=agents["draft"],
         vision_agent=agents["vision"],
         retrieval_agent=agents["retrieval"],
-        reports_dict=reports_dict,
+        reports_dict=runtime["reports_dict"],
         image_paths=image_paths,
         scan_type=scan_type
     )
@@ -195,12 +262,19 @@ async def synthesize_report(
                     data = json.loads(chunk)
                     if data.get("status") == "complete":
                         exp_path = data.get("explainable_image_path")
+                        ref_path = data.get("explainability_reference_image_path")
                         if exp_path and os.path.exists(exp_path) and exp_path != "Normal - No highlights needed":
                             with open(exp_path, "rb") as f:
                                 b64_data = base64.b64encode(f.read()).decode("utf-8")
                             data["heatmap"] = f"data:image/png;base64,{b64_data}"
                         else:
                             data["heatmap"] = None
+                        if ref_path and os.path.exists(ref_path):
+                            with open(ref_path, "rb") as f:
+                                ref_b64_data = base64.b64encode(f.read()).decode("utf-8")
+                            data["reference_image"] = f"data:image/png;base64,{ref_b64_data}"
+                        else:
+                            data["reference_image"] = None
                         print("[DEBUG] Yielding final JSON chunk from process_stream")
                         yield json.dumps(data) + "\n"
                     else:
@@ -240,7 +314,13 @@ async def health():
         "memory_used_mb": round(mem.used / (1024 ** 2)),
         "memory_total_mb": round(mem.total / (1024 ** 2)),
         "gpu_available": _torch.cuda.is_available(),
+        "ai_warmup_started": _ai_warmup_started,
+        "ai_warmup_complete": _ai_warmup_complete,
+        "ai_models_loaded": bool(agents),
     }
+    result.update(_optional_model_status)
+    if _ai_warmup_error:
+        result["ai_warmup_error"] = _ai_warmup_error
     ollama_status = _get_ollama_status()
     result.update(ollama_status)
     if not ollama_status["ollama_running"] or not ollama_status["ollama_model_available"]:
@@ -254,26 +334,16 @@ async def health():
 
 # ── Explainability Narrative Endpoint ────────────────
 from pydantic import BaseModel
-from langchain_community.chat_models import ChatOllama
-import config
 
 class ExplainRequest(BaseModel):
     findings: str
     impression: str
+    modality: str = "xray"
 
 @app.post("/api/explain")
 async def generate_explanation(req: ExplainRequest):
     try:
-        model_name = config.OLLAMA_MODEL
-        if model_name.startswith("ollama/"):
-            model_name = model_name.split("/", 1)[1]
-            
-        llm = ChatOllama(
-            model=model_name,
-            temperature=config.TEMPERATURE,
-            num_ctx=config.CONTEXT_WINDOW,
-            base_url=config.BASE_URL
-        )
+        llm = _get_explain_llm()
         
         prompt = f"""
         Act as an expert Radiologist and AI Explainer for the X-MedFusion application.
@@ -282,13 +352,13 @@ async def generate_explanation(req: ExplainRequest):
         FINDINGS: {req.findings}
         IMPRESSION: {req.impression}
         
-        The patient is viewing their original X-ray alongside an Insights heatmap generated by our Vision Agent.
+        The patient is viewing their original {req.modality.upper()} study alongside an Insights overlay generated by our Vision Agent.
         
         Please provide a highly-structured "Automated Diagnostic Narrative" that explains HOW the AI arrived at this conclusion. 
         Format your response EXACTLY in these three steps:
         
         **Step 1: Visual Feature Extraction**
-        Explain what the Vision Agent highlighted in the heatmap.
+        Explain what the Vision Agent highlighted in the overlay.
 
         **Step 2: Anatomical & Clinical Context**
         Correlate those highlighted regions to the specific anatomy (e.g., lungs, heart) and explain their clinical significance based on the FINDINGS.

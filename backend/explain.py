@@ -104,48 +104,73 @@ def generate_explainable_image(image_path, kg_data, output_path, modality="xray"
 
         if modality == "ct":
             # CT Explainability: Highlight specific grid cells
-            report_findings = kg_data.get("metadata", {}).get("report_findings", {})
-            
-            # Assume 4x4 grid as per vision_ct.py/synthesis.py
-            cols, rows = 4, 4
+            metadata = kg_data.get("metadata", {}) if isinstance(kg_data, dict) else {}
+            report_findings = metadata.get("report_findings", {})
+            ct_highlights = metadata.get("ct_highlights", []) if isinstance(metadata.get("ct_highlights", []), list) else []
+            montage_meta = metadata.get("ct_montage", {}) if isinstance(metadata.get("ct_montage", {}), dict) else {}
+
+            cols = max(1, int(montage_meta.get("cols", 4)))
+            rows = max(1, int(montage_meta.get("rows", 4)))
             cell_w = width // cols
             cell_h = height // rows
-            
-            for disease, data in report_findings.items():
-                if data.get("status") in ["present", "uncertain"] and data.get("slice_index") is not None:
-                    slice_idx = data["slice_index"]
-                    # 1-indexed to 0-indexed, and cap at 15
-                    idx = max(0, min(15, slice_idx - 1))
-                    col = idx % cols
-                    row = idx // cols
-                    
-                    bx1 = col * cell_w
-                    by1 = row * cell_h
-                    bx2 = bx1 + cell_w
-                    by2 = by1 + cell_h
-                    
-                    has_findings = True
-                    
-                    # Highlight the cell with a semi-transparent colored box
-                    highlight_color = (255, 99, 71, 80) if data.get("status") == "present" else (255, 165, 0, 80)
-                    draw.rectangle([bx1, by1, bx2, by2], fill=highlight_color, outline=(255, 255, 255, 200), width=2)
-                    
-                    # Add label
-                    label_text = f"{disease} (Slice {slice_idx})"
+
+            rendered_highlights = []
+            if ct_highlights:
+                for item in ct_highlights:
+                    if not isinstance(item, dict):
+                        continue
                     try:
-                        bbox = font.getbbox(label_text)
-                        text_w, text_h = bbox[2] - bbox[0], bbox[3] - bbox[1]
-                    except AttributeError:
-                        text_w, text_h = draw.textsize(label_text, font=font)
-                        
-                    padding = 4
-                    pill_x1 = bx1 + 5 
-                    pill_y1 = by1 + 5
-                    pill_x2 = pill_x1 + text_w + (padding * 2)
-                    pill_y2 = pill_y1 + text_h + (padding * 2)
-                    
-                    draw.rectangle([pill_x1, pill_y1, pill_x2, pill_y2], fill=(0, 0, 0, 180), outline=(255,255,255,100), width=1)
-                    draw.text((pill_x1 + padding, pill_y1 + padding), label_text, fill=(255, 255, 255, 255), font=font)
+                        slice_idx = int(item.get("slice_index"))
+                    except (TypeError, ValueError):
+                        continue
+                    if slice_idx < 1:
+                        continue
+                    rendered_highlights.append({
+                        "label": str(item.get("label", "Finding")).strip() or "Finding",
+                        "slice_index": slice_idx,
+                        "status": str(item.get("status", "present")).lower(),
+                    })
+            else:
+                for disease, data in report_findings.items():
+                    if data.get("status") in ["present", "uncertain"] and data.get("slice_index") is not None:
+                        rendered_highlights.append({
+                            "label": disease,
+                            "slice_index": data["slice_index"],
+                            "status": data.get("status", "present"),
+                        })
+
+            for item in rendered_highlights:
+                slice_idx = item["slice_index"]
+                max_idx = max(0, (rows * cols) - 1)
+                idx = max(0, min(max_idx, slice_idx - 1))
+                col = idx % cols
+                row = idx // cols
+
+                bx1 = col * cell_w
+                by1 = row * cell_h
+                bx2 = bx1 + cell_w
+                by2 = by1 + cell_h
+
+                has_findings = True
+
+                highlight_color = (255, 99, 71, 80) if item["status"] == "present" else (255, 165, 0, 80)
+                draw.rectangle([bx1, by1, bx2, by2], fill=highlight_color, outline=(255, 255, 255, 200), width=2)
+
+                label_text = f"{item['label']} (Slice {slice_idx})"
+                try:
+                    bbox = font.getbbox(label_text)
+                    text_w, text_h = bbox[2] - bbox[0], bbox[3] - bbox[1]
+                except AttributeError:
+                    text_w, text_h = draw.textsize(label_text, font=font)
+
+                padding = 4
+                pill_x1 = bx1 + 5 
+                pill_y1 = by1 + 5
+                pill_x2 = pill_x1 + text_w + (padding * 2)
+                pill_y2 = pill_y1 + text_h + (padding * 2)
+
+                draw.rectangle([pill_x1, pill_y1, pill_x2, pill_y2], fill=(0, 0, 0, 180), outline=(255,255,255,100), width=1)
+                draw.text((pill_x1 + padding, pill_y1 + padding), label_text, fill=(255, 255, 255, 255), font=font)
                     
         else:
             # X-ray Explainability (existing logic)

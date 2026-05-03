@@ -5,46 +5,57 @@
 
 const NGROK_URL = import.meta.env.VITE_API_BASE_URL_NGROK;
 const LOCAL_URL = import.meta.env.VITE_API_BASE_URL_LOCAL || "http://localhost:8000";
+const LOOPBACK_URL = "http://127.0.0.1:8000";
 
 let cachedBaseUrl: string | null = null;
 
-export const getApiBase = async (forceRefresh = false): Promise<string> => {
-  if (cachedBaseUrl && !forceRefresh) {
-    return cachedBaseUrl;
-  }
+const getCandidateBaseUrls = () => {
+  const candidates = [cachedBaseUrl, NGROK_URL, LOCAL_URL, LOOPBACK_URL]
+    .filter(Boolean)
+    .map((url) => (url as string).replace(/\/$/, ""));
 
-  if (!NGROK_URL) {
-    cachedBaseUrl = LOCAL_URL;
-    return LOCAL_URL;
-  }
+  return Array.from(new Set(candidates));
+};
 
+const canReachApi = async (baseUrl: string, timeoutMs = 2500) => {
   try {
-    // Try to ping the health endpoint of the ngrok URL
-    // We use a short timeout to avoid hanging the UI
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 2500);
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
-    const response = await fetch(`${NGROK_URL}/api/health`, {
-      method: 'GET',
+    const response = await fetch(`${baseUrl}/api/health`, {
+      method: "GET",
       signal: controller.signal,
       headers: {
-        "ngrok-skip-browser-warning": "true"
-      }
+        "ngrok-skip-browser-warning": "true",
+      },
     });
 
     clearTimeout(timeoutId);
+    return response.ok;
+  } catch {
+    return false;
+  }
+};
 
-    if (response.ok) {
-      console.log("🚀 Using Ngrok API:", NGROK_URL);
-      cachedBaseUrl = NGROK_URL;
-      return NGROK_URL;
-    }
-  } catch (error) {
-    console.warn("⚠️ Ngrok connection failed, falling back to localhost:", error);
+export const getApiBase = async (forceRefresh = false): Promise<string> => {
+  if (cachedBaseUrl && !forceRefresh && await canReachApi(cachedBaseUrl, 1200)) {
+    return cachedBaseUrl;
   }
 
-  console.log("🏠 Using Local API:", LOCAL_URL);
+  for (const candidateUrl of getCandidateBaseUrls()) {
+    if (await canReachApi(candidateUrl)) {
+      if (candidateUrl === NGROK_URL) {
+        console.log("🚀 Using Ngrok API:", candidateUrl);
+      } else {
+        console.log("🏠 Using Local API:", candidateUrl);
+      }
+      cachedBaseUrl = candidateUrl;
+      return candidateUrl;
+    }
+  }
+
   cachedBaseUrl = LOCAL_URL;
+  console.log("🏠 Using Local API:", LOCAL_URL);
   return LOCAL_URL;
 };
 
