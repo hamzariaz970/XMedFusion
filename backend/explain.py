@@ -12,19 +12,38 @@ ZONES = {
 }
 
 def parse_kg_for_visuals(kg_data):
-    """Maps diseases to their anatomical zones."""
+    """Maps diseases to their anatomical zones using intelligent string matching."""
     if not kg_data or "entities" not in kg_data: return {}
     entities = kg_data.get("entities", [])
     relations = kg_data.get("relations", [])
     zone_findings = {}
     
     for r in relations:
-        if r[2] in ["located_at", "modify"]:
-            if r[0] < len(entities) and r[1] < len(entities):
-                obs = entities[r[0]][0].title()
-                anat = entities[r[1]][0].lower()
-                if anat not in zone_findings: zone_findings[anat] = []
-                zone_findings[anat].append(obs)
+        if len(r) >= 3 and r[0] < len(entities) and r[1] < len(entities):
+            obs = entities[r[0]][0].title()
+            anat = entities[r[1]][0].lower()
+            rel = str(r[2]).lower()
+            
+            # Loosen the strict relation check. LLMs generate various relation names.
+            is_valid_relation = any(k in rel for k in ["locate", "modify", "has", "show", "involve", "suggest", "present", "affect", "evidence"])
+            is_anatomy = any(k in anat for k in ["lung", "heart", "mediastin", "pleura", "bone", "rib", "clavicle", "spine", "base", "hila", "aorta", "silhouette", "lobe", "zone"])
+            
+            if is_valid_relation or is_anatomy:
+                # Intelligent mapping to base zones
+                mapped_zone = "lungs" # Default fallback
+                if any(k in anat for k in ["right", "rl"]): mapped_zone = "right lung"
+                elif any(k in anat for k in ["left", "ll"]): mapped_zone = "left lung"
+                elif any(k in anat for k in ["mediastin", "heart", "cardiac", "aorta", "hila", "silhouette"]): mapped_zone = "mediastinum"
+                elif any(k in anat for k in ["pleura", "costophrenic", "base", "effusion", "fluid"]): mapped_zone = "pleural space"
+                elif any(k in anat for k in ["bone", "rib", "clavicle", "spine", "fracture", "osseous"]): mapped_zone = "bones"
+                else: mapped_zone = "lungs"
+                
+                # Filter out obvious non-findings
+                if obs.lower() not in ["clear", "normal", "unremarkable", "intact"]:
+                    if mapped_zone not in zone_findings: zone_findings[mapped_zone] = []
+                    if obs not in zone_findings[mapped_zone]:
+                        zone_findings[mapped_zone].append(obs)
+                        
     return zone_findings
 
 def apply_clinical_heuristics(zone_name, findings, x1, y1, x2, y2):

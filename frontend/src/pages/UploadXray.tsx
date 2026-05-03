@@ -134,6 +134,9 @@ const UploadXray = () => {
       return;
     }
 
+    // Reset previous analysis state to prevent old images/reports from persisting
+    resetAnalysis();
+
     // Cleanup old previews
     tempPreviews.forEach(p => URL.revokeObjectURL(p));
 
@@ -378,7 +381,7 @@ const UploadXray = () => {
       setTimeout(() => processFiles(files), 50);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Run only on mount
+  }, [pendingUploadFiles]); // Run when pending files are detected
 
 
   const handleReset = useCallback(() => {
@@ -389,6 +392,9 @@ const UploadXray = () => {
     setCurrentStep('idle');
     setProgress(0);
     setActiveAgentIndex(0);
+    // Reset file input value so selecting the same file again triggers onChange
+    const fileInput = document.getElementById('file-input') as HTMLInputElement;
+    if (fileInput) fileInput.value = "";
   }, [resetAnalysis, tempPreviews]);
 
   const extendedReport = report as ExtendedParsedReport | null;
