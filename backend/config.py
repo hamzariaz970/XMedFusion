@@ -11,4 +11,4 @@ CONTEXT_WINDOW = 65536  # Set to 64k for reliable 16GB VRAM performance
 BASE_URL = "http://localhost:11434"
 
 # Required for gated models like MedGemma (https://huggingface.co/google/medgemma-4b-it)
-HF_TOKEN = "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"
+HF_TOKEN = ""
