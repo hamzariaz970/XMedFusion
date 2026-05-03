@@ -15,8 +15,9 @@ Why this exists:
 
 from __future__ import annotations
 
+import argparse
 import csv
-import math
+import json
 import os
 from pathlib import Path
 from typing import Any, Sequence
@@ -27,17 +28,19 @@ from config import HF_TOKEN
 
 os.environ["HF_TOKEN"] = HF_TOKEN
 
-DEFAULT_DATA_ROOT = Path(__file__).resolve().parent / "data" / "ct_rate"
+DEFAULT_DATA_ROOT = Path(r"F:\XMedFusion\ct_rate")
+FALLBACK_DATA_ROOT = Path(__file__).resolve().parent / "data" / "ct_rate"
 DEFAULT_GRID_SIZE = (4, 4)
 DEFAULT_PAGE_SIZE = (1024, 1024)
 DEFAULT_MODEL_ID = "google/medgemma-4b-it"
+DEFAULT_OUTPUT_DIR = Path("model_weights") / "Vision_Agent" / "medgemma_ct_multimontage_fullvolume_finetuned"
 
 
 def discover_ct_rate_root(explicit_root: str | os.PathLike[str] | None = None) -> Path:
     if explicit_root:
         root = Path(explicit_root)
     else:
-        root = DEFAULT_DATA_ROOT
+        root = DEFAULT_DATA_ROOT if DEFAULT_DATA_ROOT.exists() else FALLBACK_DATA_ROOT
     if not root.exists():
         raise FileNotFoundError(f"CT-RATE root not found: {root}")
     return root
@@ -388,8 +391,173 @@ def default_local_paths(data_root: str | os.PathLike[str] | None = None) -> dict
     }
 
 
-if __name__ == "__main__":
-    paths = default_local_paths()
+def _dataset_cache_dir(data_root: Path, split_name: str, max_montages: int | None) -> Path:
+    suffix = "all_pages" if max_montages is None else f"max_{max_montages}_pages"
+    return data_root / "cached_dataset" / f"multimontage_{split_name}_{suffix}"
+
+
+def load_or_create_multimontage_dataset(
+    *,
+    reports_csv: Path,
+    metadata_csv: Path,
+    jpegs_root: Path,
+    cache_dir: Path,
+    max_montages: int | None,
+) -> Any:
+    from datasets import load_from_disk
+
+    if cache_dir.exists():
+        print(f"✅ Loading cached multi-montage dataset from {cache_dir}")
+        return load_from_disk(str(cache_dir))
+
+    print(f"Building multi-montage dataset from {reports_csv.name} ...")
+    meta_dict = load_metadata_dict(metadata_csv)
+    dataset = load_and_format_multimontage_dataset(
+        reports_csv,
+        meta_dict=meta_dict,
+        jpegs_root=jpegs_root,
+        max_montages=max_montages,
+    )
+    cache_dir.parent.mkdir(parents=True, exist_ok=True)
+    dataset.save_to_disk(str(cache_dir))
+    print(f"✅ Saved dataset cache to {cache_dir}")
+    return dataset
+
+
+def make_multimontage_collator(
+    *,
+    processor: Any,
+    max_montages: int | None,
+    grid_size: tuple[int, int] = DEFAULT_GRID_SIZE,
+    target_size: tuple[int, int] = DEFAULT_PAGE_SIZE,
+):
+    def collate_fn(examples: Sequence[dict[str, Any]]) -> dict[str, Any]:
+        texts: list[str] = []
+        batch_images: list[list[Image.Image]] = []
+
+        for example in examples:
+            montage_pages, montage_meta = build_volume_montage_pages(
+                example["volume_dir"],
+                grid_size=grid_size,
+                target_size=target_size,
+                max_montages=max_montages,
+            )
+            prompt_text = build_ct_rate_style_prompt(
+                patient_demo=example["patient_demo"],
+                page_metadata=montage_meta["pages"],
+            )
+            messages = [
+                {
+                    "role": "user",
+                    "content": [{"type": "image"} for _ in montage_pages] + [{"type": "text", "text": prompt_text}],
+                },
+                {
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": example["ground_truth"]}],
+                },
+            ]
+
+            texts.append(
+                processor.apply_chat_template(
+                    messages,
+                    add_generation_prompt=False,
+                    tokenize=False,
+                ).strip()
+            )
+            batch_images.append([page.convert("RGB") for page in montage_pages])
+
+        batch = processor(text=texts, images=batch_images, return_tensors="pt", padding=True)
+        labels = batch["input_ids"].clone()
+
+        pad_token_id = processor.tokenizer.pad_token_id
+        if pad_token_id is not None:
+            labels[labels == pad_token_id] = -100
+
+        image_token_candidates = []
+        for token_name in ("boi_token", "image_token"):
+            token_value = processor.tokenizer.special_tokens_map.get(token_name)
+            if token_value:
+                image_token_candidates.append(processor.tokenizer.convert_tokens_to_ids(token_value))
+        image_token_candidates.extend([262144, 262145])
+
+        for token_id in set(token_id for token_id in image_token_candidates if token_id is not None and token_id >= 0):
+            labels[labels == token_id] = -100
+
+        batch["labels"] = labels
+        return batch
+
+    return collate_fn
+
+
+def run_multimontage_evaluation(
+    *,
+    model_id_or_path: str,
+    test_dataset: Any,
+    processor: Any,
+    output_dir: str | os.PathLike[str],
+    max_montages: int | None,
+    eval_limit: int = 20,
+) -> list[dict[str, Any]]:
+    import torch
+    from peft import PeftModel
+    from transformers import AutoModelForImageTextToText
+
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+
+    is_adapter_path = Path(model_id_or_path).is_dir() and (Path(model_id_or_path) / "adapter_config.json").exists()
+    if is_adapter_path:
+        base = AutoModelForImageTextToText.from_pretrained(
+            DEFAULT_MODEL_ID,
+            torch_dtype=torch.bfloat16,
+            device_map={"": "cuda:0"},
+            attn_implementation="eager",
+            token=HF_TOKEN,
+        )
+        model = PeftModel.from_pretrained(base, model_id_or_path)
+        model = model.merge_and_unload()
+    else:
+        model = AutoModelForImageTextToText.from_pretrained(
+            model_id_or_path,
+            torch_dtype=torch.bfloat16,
+            device_map={"": "cuda:0"},
+            attn_implementation="eager",
+            token=HF_TOKEN,
+        )
+    model.eval()
+
+    results: list[dict[str, Any]] = []
+    limit = min(eval_limit, len(test_dataset))
+    for idx in range(limit):
+        example = test_dataset[idx]
+        generation = generate_multimontage_report(
+            processor=processor,
+            model=model,
+            volume_dir=example["volume_dir"],
+            patient_demo=example["patient_demo"],
+            max_montages=max_montages,
+        )
+        results.append(
+            {
+                "id": example["id"],
+                "ground_truth": example["ground_truth"],
+                "prediction": generation["report"],
+                "page_count": generation["page_count"],
+                "montage_metadata": generation["montage_metadata"],
+            }
+        )
+
+    with (output_path / "multimontage_eval_generations.json").open("w", encoding="utf-8") as handle:
+        json.dump(results, handle, indent=2)
+
+    del model
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    print(f"Saved multi-montage evaluation generations to {output_path / 'multimontage_eval_generations.json'}")
+    return results
+
+
+def inspect_local_ct_rate_examples(paths: dict[str, Path]) -> None:
     examples = summarize_ct_rate_local_reports(data_root=paths["data_root"], split="validation", limit=3)
     print("Local CT-RATE examples:")
     for idx, row in enumerate(examples, start=1):
@@ -398,8 +566,176 @@ if __name__ == "__main__":
         print(f"Impression: {row['Impressions_EN'][:200]}...")
 
     sample_volume = paths["jpegs_root"] / "valid_1_a_1"
-    pages, metadata = build_volume_montage_pages(sample_volume)
+    _, metadata = build_volume_montage_pages(sample_volume)
     print(f"\nSample volume: {sample_volume}")
     print(f"Source slices: {metadata['source_image_count']}")
     print(f"Montage pages needed to cover all slices: {metadata['total_possible_pages']}")
     print(f"Selected pages: {metadata['selected_page_count']}")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Fine-tune MedGemma on CT-RATE multi-montage studies.")
+    parser.add_argument("--data-root", default=None, help="CT-RATE root. Defaults to F:\\XMedFusion\\ct_rate if present.")
+    parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR), help="Directory to save adapter checkpoints.")
+    parser.add_argument("--max-montages", type=int, default=None, help="Maximum montage pages per study. Default uses all pages.")
+    parser.add_argument("--baseline", action="store_true", help="Run evaluation on the raw base MedGemma model.")
+    parser.add_argument("--eval-only", action="store_true", help="Skip training and only evaluate the saved adapter.")
+    parser.add_argument("--inspect-only", action="store_true", help="Print dataset/report examples and exit.")
+    parser.add_argument("--eval-limit", type=int, default=20, help="Number of validation studies to generate during evaluation.")
+    parser.add_argument("--epochs", type=int, default=1, help="Training epochs.")
+    parser.add_argument("--learning-rate", type=float, default=5e-5, help="Learning rate.")
+    parser.add_argument("--grad-accum", type=int, default=8, help="Gradient accumulation steps.")
+    args = parser.parse_args()
+
+    paths = default_local_paths(args.data_root)
+    if args.inspect_only:
+        inspect_local_ct_rate_examples(paths)
+        return
+
+    import torch
+    from peft import LoraConfig
+    from transformers import AutoModelForImageTextToText, AutoProcessor, BitsAndBytesConfig
+    from trl import SFTConfig, SFTTrainer
+
+    if torch.cuda.get_device_capability()[0] < 8:
+        print("Warning: GPU does not officially support bfloat16 natively. Performance may be degraded.")
+
+    processor = AutoProcessor.from_pretrained(DEFAULT_MODEL_ID, token=HF_TOKEN)
+    processor.tokenizer.padding_side = "right"
+
+    train_cache = _dataset_cache_dir(paths["data_root"], "train", args.max_montages)
+    valid_cache = _dataset_cache_dir(paths["data_root"], "validation", args.max_montages)
+    train_dataset = load_or_create_multimontage_dataset(
+        reports_csv=paths["train_reports_csv"],
+        metadata_csv=paths["train_metadata_csv"],
+        jpegs_root=paths["jpegs_root"],
+        cache_dir=train_cache,
+        max_montages=args.max_montages,
+    )
+    valid_dataset = load_or_create_multimontage_dataset(
+        reports_csv=paths["valid_reports_csv"],
+        metadata_csv=paths["valid_metadata_csv"],
+        jpegs_root=paths["jpegs_root"],
+        cache_dir=valid_cache,
+        max_montages=args.max_montages,
+    )
+    print(f"Train size: {len(train_dataset)} | Validation size: {len(valid_dataset)}")
+
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    if args.baseline:
+        run_multimontage_evaluation(
+            model_id_or_path=DEFAULT_MODEL_ID,
+            test_dataset=valid_dataset,
+            processor=processor,
+            output_dir=output_dir,
+            max_montages=args.max_montages,
+            eval_limit=args.eval_limit,
+        )
+        return
+
+    if args.eval_only:
+        if not output_dir.exists() or not any(output_dir.iterdir()):
+            raise FileNotFoundError(f"No saved adapter found in {output_dir}")
+        run_multimontage_evaluation(
+            model_id_or_path=str(output_dir),
+            test_dataset=valid_dataset,
+            processor=processor,
+            output_dir=output_dir,
+            max_montages=args.max_montages,
+            eval_limit=args.eval_limit,
+        )
+        return
+
+    print("\nInitializing multi-montage QLoRA model...")
+    model = AutoModelForImageTextToText.from_pretrained(
+        DEFAULT_MODEL_ID,
+        token=HF_TOKEN,
+        torch_dtype=torch.bfloat16,
+        device_map="auto",
+        attn_implementation="eager",
+        quantization_config=BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_use_double_quant=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_compute_dtype=torch.bfloat16,
+        ),
+    )
+
+    peft_config = LoraConfig(
+        lora_alpha=32,
+        lora_dropout=0.05,
+        r=16,
+        bias="none",
+        target_modules="all-linear",
+        task_type="CAUSAL_LM",
+        modules_to_save=["lm_head", "embed_tokens"],
+    )
+
+    collate_fn = make_multimontage_collator(
+        processor=processor,
+        max_montages=args.max_montages,
+    )
+
+    resume_from_checkpoint = output_dir.exists() and any(output_dir.iterdir())
+    if resume_from_checkpoint:
+        print(f"Found existing checkpoint at {output_dir}. Training will resume from it.")
+
+    sft_config = SFTConfig(
+        output_dir=str(output_dir),
+        num_train_epochs=args.epochs,
+        per_device_train_batch_size=1,
+        per_device_eval_batch_size=1,
+        gradient_accumulation_steps=args.grad_accum,
+        gradient_checkpointing=True,
+        gradient_checkpointing_kwargs={"use_reentrant": False},
+        optim="adamw_torch_fused",
+        logging_steps=5,
+        eval_strategy="epoch",
+        save_strategy="epoch",
+        load_best_model_at_end=True,
+        metric_for_best_model="eval_loss",
+        greater_is_better=False,
+        learning_rate=args.learning_rate,
+        bf16=True,
+        max_grad_norm=0.3,
+        warmup_ratio=0.1,
+        lr_scheduler_type="cosine",
+        dataset_kwargs={"skip_prepare_dataset": True},
+        remove_unused_columns=False,
+        label_names=["labels"],
+    )
+
+    trainer = SFTTrainer(
+        model=model,
+        args=sft_config,
+        train_dataset=train_dataset,
+        eval_dataset=valid_dataset,
+        peft_config=peft_config,
+        processing_class=processor,
+        data_collator=collate_fn,
+    )
+
+    print("\n🚀 Starting multi-montage fine-tuning...")
+    trainer.train(resume_from_checkpoint=resume_from_checkpoint)
+    print(f"✅ Saving adapter to {output_dir} ...")
+    trainer.save_model(str(output_dir))
+
+    del model
+    del trainer
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+    run_multimontage_evaluation(
+        model_id_or_path=str(output_dir),
+        test_dataset=valid_dataset,
+        processor=processor,
+        output_dir=output_dir,
+        max_montages=args.max_montages,
+        eval_limit=args.eval_limit,
+    )
+
+
+if __name__ == "__main__":
+    main()

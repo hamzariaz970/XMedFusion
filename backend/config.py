@@ -1,3 +1,8 @@
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
 # config.py
 
 # CHANGE THIS ONE LINE to switch models everywhere
@@ -11,4 +16,4 @@ CONTEXT_WINDOW = 65536  # Set to 64k for reliable 16GB VRAM performance
 BASE_URL = "http://localhost:11434"
 
 # Required for gated models like MedGemma (https://huggingface.co/google/medgemma-4b-it)
-HF_TOKEN = ""
+HF_TOKEN = os.environ.get("HF_TOKEN", "")
