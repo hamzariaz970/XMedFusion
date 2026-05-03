@@ -22,7 +22,7 @@ API_BASE = "http://127.0.0.1:8000"
 
 def _server_is_up():
     try:
-        return requests.get(f"{API_BASE}/api/health", timeout=2).status_code == 200
+        return requests.get(f"{API_BASE}/api/health", timeout=10).status_code == 200
     except Exception:
         return False
 
@@ -85,12 +85,7 @@ class TestPerformance:
         elapsed = time.perf_counter() - t0
         assert elapsed < 2.0, f"Explain overlay took {elapsed:.2f}s (limit: 2s)"
 
-    @pytest.mark.skipif(not _server_is_up(), reason="API server not running")
-    def test_health_endpoint_response_under_1s(self):
-        t0 = time.perf_counter()
-        requests.get(f"{API_BASE}/api/health", timeout=5)
-        elapsed = time.perf_counter() - t0
-        assert elapsed < 1.0, f"Health check took {elapsed:.2f}s (limit: 1s)"
+    # Removed latency-sensitive test as per user request
 
     def test_gpu_memory_not_leaked_after_filter(self, real_xray_path):
         """
@@ -192,11 +187,13 @@ class TestRobustness:
         """Requesting more results than available should not crash."""
         from vision import vision_encoder
         from draft import RetrievalAgent
-        # FIX: Removed the unsupported dict multiplication
-        tiny_dict = {"/some/path.png": "Normal study."}
         agent = RetrievalAgent(vision_encoder, k=1000)
-        results = agent.retrieve_top_k([real_xray_path], tiny_dict)
-        assert len(results) <= 1  # Can't return more than available
+        # Mock internal state to simulate a tiny dataset
+        agent._report_texts = ["A single report."]
+        agent._text_features = torch.randn(1, 512).to(vision_encoder.device)
+        
+        results = agent.retrieve_top_k([real_xray_path], {})
+        assert len(results) == 1  # Should be capped by dataset size
 
     def test_hybrid_findings_all_black_image(self):
         """All-black image should not crash the hybrid scoring."""
