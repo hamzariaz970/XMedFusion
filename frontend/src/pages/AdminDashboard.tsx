@@ -109,6 +109,8 @@ const AdminDashboard = () => {
   const [hilReviewScans, setHilReviewScans] = useState<(HILScan & { report?: HILReport })[]>([]);
   const [hilFinetuning, setHilFinetuning] = useState(false);
   const [clinicalFeedback, setClinicalFeedback] = useState<ClinicalFeedbackRow[]>([]);
+  const [selectedFeedbackIds, setSelectedFeedbackIds] = useState<Set<string>>(new Set());
+  const [batchApproving, setBatchApproving] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const fetchDoctors = useCallback(async () => {
@@ -207,7 +209,21 @@ const AdminDashboard = () => {
   useEffect(() => {
     fetchDoctors(); fetchPending(); fetchAdmins(); fetchCounts(); fetchHealth(); fetchHilTasks(); fetchClinicalFeedback();
     const interval = setInterval(fetchHealth, 10000);
-    return () => clearInterval(interval);
+
+    // Real-time subscription: refresh clinical feedback whenever a doctor inserts/updates a feedback row
+    const channel = supabase
+      .channel("feedback-admin-watch")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "feedback" },
+        () => { fetchClinicalFeedback(); }
+      )
+      .subscribe();
+
+    return () => {
+      clearInterval(interval);
+      supabase.removeChannel(channel);
+    };
   }, [fetchDoctors, fetchPending, fetchAdmins, fetchCounts, fetchHealth, fetchHilTasks, fetchClinicalFeedback]);
 
   // Approve / Reject pending
@@ -337,12 +353,51 @@ const AdminDashboard = () => {
   };
 
   const handleApproveClinicalHIL = async (feedbackId: string) => {
+    // Optimistic update: remove from UI immediately
+    setClinicalFeedback(prev => prev.filter(fb => fb.id !== feedbackId));
+    setSelectedFeedbackIds(prev => { const n = new Set(prev); n.delete(feedbackId); return n; });
     const { error } = await supabase.from("feedback").update({ status: "hil_approved" }).eq("id", feedbackId);
     if (!error) {
        toast.success("Sent for training the model!");
-       fetchClinicalFeedback();
     } else {
        toast.error(error.message);
+       fetchClinicalFeedback();
+    }
+  };
+
+  const handleBatchApproveClinicalHIL = async () => {
+    if (selectedFeedbackIds.size === 0) return;
+    setBatchApproving(true);
+    const ids = Array.from(selectedFeedbackIds);
+    // Optimistic update
+    setClinicalFeedback(prev => prev.filter(fb => !selectedFeedbackIds.has(fb.id)));
+    setSelectedFeedbackIds(new Set());
+    const { error } = await supabase
+      .from("feedback")
+      .update({ status: "hil_approved" })
+      .in("id", ids);
+    if (!error) {
+      toast.success(`${ids.length} report${ids.length > 1 ? "s" : ""} approved for HIL training!`);
+    } else {
+      toast.error(error.message);
+      fetchClinicalFeedback();
+    }
+    setBatchApproving(false);
+  };
+
+  const toggleFeedbackSelection = (id: string) => {
+    setSelectedFeedbackIds(prev => {
+      const n = new Set(prev);
+      n.has(id) ? n.delete(id) : n.add(id);
+      return n;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedFeedbackIds.size === clinicalFeedback.length) {
+      setSelectedFeedbackIds(new Set());
+    } else {
+      setSelectedFeedbackIds(new Set(clinicalFeedback.map(fb => fb.id)));
     }
   };
 
@@ -396,7 +451,7 @@ const AdminDashboard = () => {
     { id: "doctors" as const, label: "Doctor Registry", icon: Stethoscope },
     { id: "pending" as const, label: `Pending Requests (${pendingRequests.length})`, icon: Clock },
     { id: "admins" as const, label: "Admin Management", icon: Crown },
-    { id: "hil" as const, label: `HIL Feedback (${hilTasks.length})`, icon: Brain },
+    { id: "hil" as const, label: `HIL Feedback (${hilTasks.length})${clinicalFeedback.length > 0 ? ` · ${clinicalFeedback.length} pending` : ""}`, icon: Brain },
   ];
 
   return (
@@ -605,46 +660,109 @@ const AdminDashboard = () => {
               {/* Pending Clinical Approvals */}
               <Card className="surface-card mt-6">
                 <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <CheckCircle className="w-5 h-5 text-emerald-500" />
-                    Pending Clinical Reports for HIL
-                  </CardTitle>
+                  <div className="flex items-center justify-between flex-wrap gap-3">
+                    <CardTitle className="flex items-center gap-2">
+                      <CheckCircle className="w-5 h-5 text-emerald-500" />
+                      Pending Clinical Reports for HIL
+                      {clinicalFeedback.length > 0 && (
+                        <Badge className="ml-1 bg-emerald-500/20 text-emerald-700 border-emerald-500/30 text-xs">
+                          {clinicalFeedback.length} pending
+                        </Badge>
+                      )}
+                    </CardTitle>
+                    <div className="flex items-center gap-2">
+                      {clinicalFeedback.length > 0 && (
+                        <>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={toggleSelectAll}
+                            className="gap-1.5 text-xs"
+                          >
+                            {selectedFeedbackIds.size === clinicalFeedback.length ? (
+                              <XCircle className="w-3.5 h-3.5" />
+                            ) : (
+                              <CheckCircle className="w-3.5 h-3.5" />
+                            )}
+                            {selectedFeedbackIds.size === clinicalFeedback.length ? "Deselect All" : "Select All"}
+                          </Button>
+                          {selectedFeedbackIds.size > 0 && (
+                            <Button
+                              size="sm"
+                              onClick={handleBatchApproveClinicalHIL}
+                              disabled={batchApproving}
+                              className="gap-1.5 bg-emerald-600 hover:bg-emerald-700 shadow-glow text-xs"
+                            >
+                              <Zap className="w-3.5 h-3.5" />
+                              {batchApproving ? "Approving..." : `Approve ${selectedFeedbackIds.size} Selected`}
+                            </Button>
+                          )}
+                        </>
+                      )}
+                      <Button variant="ghost" size="sm" onClick={fetchClinicalFeedback} className="gap-1 text-muted-foreground hover:text-foreground">
+                        <Activity className="w-3.5 h-3.5" /> Refresh
+                      </Button>
+                    </div>
+                  </div>
                 </CardHeader>
                 <CardContent>
                   {clinicalFeedback.length === 0 ? (
                     <div className="text-center py-8 text-muted-foreground">
                       <CheckCircle className="w-10 h-10 mx-auto mb-3 opacity-40 text-emerald-500" />
                       <p>No pending clinical reports to approve.</p>
+                      <p className="text-xs mt-1 opacity-60">Reports appear here when a doctor clicks "Approve as Final" on a scan.</p>
                     </div>
                   ) : (
                     <div className="space-y-4">
                       {clinicalFeedback.map(fb => {
                         const previewImageUrl = getPreviewImageUrl(fb.scan);
+                        const isSelected = selectedFeedbackIds.has(fb.id);
                         return (
-                          <div key={fb.id} className="space-y-3 rounded-[24px] border border-border/50 bg-white/70 p-4 transition-all duration-300 hover:border-emerald-500/30 hover:shadow-card">
-                            <div className="flex items-center justify-between">
-                              <div>
+                          <div
+                            key={fb.id}
+                            onClick={() => toggleFeedbackSelection(fb.id)}
+                            className={cn(
+                              "space-y-3 rounded-[24px] border p-4 transition-all duration-200 cursor-pointer select-none",
+                              isSelected
+                                ? "border-emerald-500/60 bg-emerald-50/60 shadow-md ring-2 ring-emerald-500/20"
+                                : "border-border/50 bg-white/70 hover:border-emerald-500/30 hover:shadow-card"
+                            )}
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              {/* Checkbox indicator */}
+                              <div className={cn(
+                                "mt-0.5 flex-shrink-0 w-5 h-5 rounded-full border-2 flex items-center justify-center transition-all",
+                                isSelected ? "border-emerald-500 bg-emerald-500" : "border-border/60 bg-white"
+                              )}>
+                                {isSelected && <CheckCircle className="w-3.5 h-3.5 text-white" />}
+                              </div>
+                              <div className="flex-1">
                                 <h4 className="font-semibold text-foreground">Scan ID: {fb.scan_id?.slice(0, 8)}...</h4>
                                 <p className="text-sm text-muted-foreground">
                                   Submitted by: {fb.doctor?.full_name || fb.doctor?.email || "Unknown Doctor"}
                                 </p>
                               </div>
-                              <Badge variant="outline" className="bg-emerald-500/10 text-emerald-600 border-emerald-500/30">
-                                Pending Admin Approval
+                              <Badge variant="outline" className={cn(
+                                "text-xs flex-shrink-0",
+                                isSelected
+                                  ? "bg-emerald-500/20 text-emerald-700 border-emerald-500/40"
+                                  : "bg-emerald-500/10 text-emerald-600 border-emerald-500/30"
+                              )}>
+                                {isSelected ? "✓ Selected" : "Pending Approval"}
                               </Badge>
                             </div>
-                            
+
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-2">
                               {previewImageUrl ? (
-                                <div>
-                                  <img 
-                                    src={previewImageUrl} 
-                                    alt="Scan" 
-                                    className="max-h-[200px] w-full rounded-[16px] border bg-black/5 object-contain" 
+                                <div onClick={e => e.stopPropagation()}>
+                                  <img
+                                    src={previewImageUrl}
+                                    alt="Scan"
+                                    className="max-h-[200px] w-full rounded-[16px] border bg-black/5 object-contain"
                                   />
                                 </div>
                               ) : (
-                                <div className="flex min-h-[200px] items-center justify-center rounded-[16px] border border-dashed border-border/70 bg-muted/30 text-sm text-muted-foreground">
+                                <div className="flex min-h-[120px] items-center justify-center rounded-[16px] border border-dashed border-border/70 bg-muted/30 text-sm text-muted-foreground">
                                   Scan preview unavailable
                                 </div>
                               )}
@@ -660,13 +778,15 @@ const AdminDashboard = () => {
                               </div>
                             </div>
 
-                            <div className="flex justify-end mt-4 pt-3 border-t border-border/50">
-                              <Button 
+                            <div className="flex justify-end mt-3 pt-3 border-t border-border/50" onClick={e => e.stopPropagation()}>
+                              <Button
                                 onClick={() => handleApproveClinicalHIL(fb.id)}
-                                className="gap-2 bg-emerald-600 hover:bg-emerald-700 shadow-glow"
+                                size="sm"
+                                variant="outline"
+                                className="gap-2 text-emerald-700 border-emerald-500/40 hover:bg-emerald-50"
                               >
-                                <CheckCircle className="w-4 h-4" />
-                                Approve for HIL Training
+                                <CheckCircle className="w-3.5 h-3.5" />
+                                Approve This One
                               </Button>
                             </div>
                           </div>
