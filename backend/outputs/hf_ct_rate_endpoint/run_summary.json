@@ -1,0 +1,9 @@
+[
+  {
+    "study_id": "valid_1000_a_1",
+    "page_count": 2,
+    "output_dir": "D:\\FYP\\XMedFusion\\backend\\outputs\\hf_ct_rate_endpoint\\valid_1000_a_1",
+    "report": "DRY RUN: endpoint not called.",
+    "dry_run": true
+  }
+]

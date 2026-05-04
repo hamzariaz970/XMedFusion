@@ -1,0 +1,9 @@
+{
+  "message_count": 1,
+  "content_item_count": 3,
+  "has_model_field": false,
+  "page_count": 2,
+  "max_tokens": 900,
+  "temperature": 0.2,
+  "study_id": "valid_1000_a_1"
+}

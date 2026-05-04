@@ -1,0 +1,22 @@
+You are an expert thoracic radiologist analyzing a CT-RATE style chest CT study.
+The study is provided as multiple montage pages in cranio-caudal order. Each page contains axial slices.
+Clinical indication: 42-year-old Male
+
+Montage coverage:
+- Page 1 covers slices 1 to 16.
+- Page 2 covers slices 193 to 194.
+
+Write a detailed structured report that matches CT-RATE style.
+Requirements:
+1. Include a comprehensive FINDINGS section with complete sentences.
+2. Include a concise IMPRESSION section summarizing the main conclusions.
+3. Mention mediastinum, lungs, pleura, heart, visible upper abdomen, and bones when relevant.
+4. If a finding is best supported by a specific page or slice span, mention it in prose.
+5. Do not truncate the report. Finish all sentences.
+
+Output exactly:
+FINDINGS:
+<detailed findings>
+
+IMPRESSION:
+<concise impression>
