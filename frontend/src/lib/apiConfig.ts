@@ -3,7 +3,7 @@
  * Handles fallback between Ngrok and Localhost
  */
 
-const NGROK_URL = import.meta.env.VITE_API_BASE_URL_NGROK;
+const NGROK_URL = import.meta.env.VITE_API_BASE_URL_NGROK || import.meta.env.VITE_API_BASE_URL;
 const LOCAL_URL = import.meta.env.VITE_API_BASE_URL_LOCAL || "http://localhost:8000";
 const LOOPBACK_URL = "http://127.0.0.1:8000";
 
