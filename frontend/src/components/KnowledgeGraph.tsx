@@ -50,7 +50,8 @@ const nodeTypeColors: Record<string, { bg: string; border: string; text: string;
   anatomy: { bg: "bg-blue-500/20", border: "border-blue-500", text: "text-blue-600 dark:text-blue-400", fill: "fill-blue-500/20", icon: Layers },
   finding: { bg: "bg-emerald-500/20", border: "border-emerald-500", text: "text-emerald-600 dark:text-emerald-400", fill: "fill-emerald-500/20", icon: Activity },
   diagnosis: { bg: "bg-amber-500/20", border: "border-amber-500", text: "text-amber-600 dark:text-amber-400", fill: "fill-amber-500/20", icon: AlertCircle },
-  uncertain: { bg: "bg-muted/20", border: "border-muted-foreground", text: "text-muted-foreground", fill: "fill-muted-foreground/20", icon: Info },
+  uncertain: { bg: "bg-amber-400/20", border: "border-amber-400", text: "text-amber-600", fill: "fill-amber-400/20", icon: Info },
+  absent: { bg: "bg-slate-200/50", border: "border-slate-300", text: "text-slate-400", fill: "fill-slate-200/50", icon: X },
 };
 
 // Relation Types Legend
@@ -108,10 +109,19 @@ const calculateLayout = (entities: [string, string][]) => {
 
   entities.forEach(([text, label], index) => {
     let type = "uncertain";
-    if (label.includes("Anatomy")) type = "anatomy";
-    else if (label.includes("Observation")) type = "finding";
+    if (label.includes("Anatomy")) {
+      type = "anatomy";
+    } else if (label === "AbsentObservation") {
+      type = "absent";
+    } else if (label === "UncertainObservation") {
+      type = "uncertain";
+    } else if (label === "Observation") {
+      type = "finding";
+    }
     
-    if ((text.toLowerCase().includes("normal") || text.toLowerCase().includes("pneumonia") || text.toLowerCase().includes("edema")) && type === "finding") {
+    // Auto-escalate clear pathology terms to 'diagnosis' for visual weight
+    const clinicalTerms = ["pneumonia", "edema", "cardiomegaly", "effusion", "pneumothorax"];
+    if (type === "finding" && clinicalTerms.some(term => text.toLowerCase().includes(term))) {
         type = "diagnosis";
     }
 

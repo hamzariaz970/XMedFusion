@@ -263,7 +263,7 @@ async def synthesize_report(
                     if data.get("status") == "complete":
                         exp_path = data.get("explainable_image_path")
                         ref_path = data.get("explainability_reference_image_path")
-                        if exp_path and os.path.exists(exp_path) and exp_path != "Normal - No highlights needed":
+                        if exp_path and os.path.exists(exp_path):
                             with open(exp_path, "rb") as f:
                                 b64_data = base64.b64encode(f.read()).decode("utf-8")
                             data["heatmap"] = f"data:image/png;base64,{b64_data}"

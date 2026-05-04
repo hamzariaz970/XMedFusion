@@ -349,17 +349,24 @@ def generate_explainable_image(image_path, kg_data, output_path, modality="xray"
                     )
                 has_findings = True
 
-        if has_findings:
-            # Legend removed as per user request for dynamic colors
-            # _draw_legend(draw, width, height, font_leg)
+        if not has_findings:
+            # Draw a "Normal Study" badge in the top-right corner
+            badge_text = " STUDY APPEARS NORMAL "
+            tw, th = _text_size(draw, badge_text, font_label)
+            margin = 20
+            bx1 = width - tw - margin - 10
+            by1 = margin
+            bx2 = width - margin
+            by2 = margin + th + 10
+            
+            draw.rectangle([bx1, by1, bx2, by2], fill=(46, 204, 113, 220), outline=(255, 255, 255, 255), width=2)
+            draw.text((bx1 + 5, by1 + 5), badge_text, fill=(255, 255, 255, 255), font=font_label)
 
-            # Composite: base → fill layer → border/label layer
-            composed = Image.alpha_composite(base_img, fill_layer)
-            composed = Image.alpha_composite(composed, border_layer)
-            composed.convert("RGB").save(output_path)
-            return output_path
-
-        return None
+        # Composite: base → fill layer → border/label layer
+        composed = Image.alpha_composite(base_img, fill_layer)
+        composed = Image.alpha_composite(composed, border_layer)
+        composed.convert("RGB").save(output_path)
+        return output_path
 
     except Exception as e:
         print(f"[explain.py] Error generating explainability image: {e}")

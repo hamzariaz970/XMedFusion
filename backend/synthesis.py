@@ -573,7 +573,7 @@ def _ground_ct_report_findings(ct_montage: Image.Image, report: str) -> list[dic
 def _anatomy_index(entities: list, anatomy_to_idx: dict, anatomy: str) -> int:
     if anatomy not in anatomy_to_idx:
         anatomy_to_idx[anatomy] = len(entities)
-        entities.append([anatomy, "Anatomy"])
+        entities.append([anatomy, "Anatomy::Anatomical site"])
     return anatomy_to_idx[anatomy]
 
 
@@ -596,13 +596,17 @@ def build_kg_from_synthesis_report(final_report: str, evidence_bundle: dict | No
         anat_idx = _anatomy_index(entities, anatomy_to_idx, anatomy)
         obs_idx = len(entities)
         if status == "absent":
-            entities.append([disease.lower(), "AbsentObservation"])
-            relations.append([obs_idx, anat_idx, "absent_at"])
+            # Only show 'absent' nodes for clinically critical rule-outs to avoid graph clutter
+            if disease in config.CRITICAL_RULE_OUTS:
+                entities.append([disease.lower(), f"AbsentObservation::{finding.get('source_sentence', 'No evidence of ' + disease.lower())}"])
+                relations.append([obs_idx, anat_idx, "absent_at"])
+            else:
+                continue
         elif status == "uncertain":
-            entities.append([disease.lower(), "UncertainObservation"])
+            entities.append([disease.lower(), f"UncertainObservation::{finding.get('source_sentence', 'Possible ' + disease.lower())}"])
             relations.append([obs_idx, anat_idx, "possible_at"])
         else:
-            entities.append([disease.lower(), "Observation"])
+            entities.append([disease.lower(), f"Observation::{finding.get('source_sentence', disease + ' detected in ' + anatomy)}"])
             relations.append([obs_idx, anat_idx, "located_at"])
 
     if not entities and ct_highlights:
@@ -838,14 +842,18 @@ def build_kg_from_evidence(evidence_bundle: dict | None, final_report: str = "")
         anat_idx = _anatomy_index(entities, anatomy_to_idx, finding["anatomy"])
         obs_idx = len(entities)
         if status == "present":
-            entities.append([disease.lower(), "Observation"])
+            entities.append([disease.lower(), f"Observation::{finding.get('reason', 'Classifier evidence supports presence.')}"])
             relations.append([obs_idx, anat_idx, "located_at"])
         elif status == "uncertain":
-            entities.append([disease.lower(), "UncertainObservation"])
+            entities.append([disease.lower(), f"UncertainObservation::{finding.get('reason', 'Borderline classifier evidence.')}"])
             relations.append([obs_idx, anat_idx, "possible_at"])
         elif status == "absent":
-            entities.append([disease.lower(), "AbsentObservation"])
-            relations.append([obs_idx, anat_idx, "absent_at"])
+            # Only show 'absent' nodes for clinically critical rule-outs to avoid graph clutter
+            if disease in config.CRITICAL_RULE_OUTS:
+                entities.append([disease.lower(), f"AbsentObservation::{finding.get('reason', 'No classifier evidence detected.')}"])
+                relations.append([obs_idx, anat_idx, "absent_at"])
+            else:
+                continue
 
     if not entities:
         chest_idx = _anatomy_index(entities, anatomy_to_idx, "chest")
@@ -1723,7 +1731,7 @@ class LocalSynthesisAgent:
                 "knowledge_graph": kg_json,
                 "explainability": explainability_trace,
                 "explainability_reference_image_path": reference_img_path,
-                "explainable_image_path": explained_path if explained_path else "Normal - No highlights needed"
+                "explainable_image_path": explained_path
             }) + "\n"
             print("[DEBUG] Successfully serialized final chunk to JSON")
             yield out_str

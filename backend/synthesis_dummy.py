@@ -319,7 +319,7 @@ class LocalSynthesisAgent:
             "final_report": final_report, 
             "knowledge_graph": kg_json,
             "explainability": explainability_trace,
-            "explainable_image_path": explained_path if explained_path else "Normal - No highlights needed"
+            "explainable_image_path": explained_path
         }) + "\n"
 
 # -------------------------------
