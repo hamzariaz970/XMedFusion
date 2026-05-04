@@ -6,6 +6,13 @@ type AuthContextType = {
   session: Session | null;
   user: User | null;
   loading: boolean;
+  roleLoading: boolean;
+  userRole: string | null;
+  isAdmin: boolean;
+  isApproved: boolean;
+  isPending: boolean;
+  isRejected: boolean;
+  refreshRole: () => Promise<void>;
   signOut: () => Promise<void>;
 };
 
@@ -13,6 +20,13 @@ const AuthContext = createContext<AuthContextType>({
   session: null,
   user: null,
   loading: true,
+  roleLoading: true,
+  userRole: null,
+  isAdmin: false,
+  isApproved: false,
+  isPending: false,
+  isRejected: false,
+  refreshRole: async () => {},
   signOut: async () => {},
 });
 
@@ -20,6 +34,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [roleLoading, setRoleLoading] = useState(true);
+  const [userRole, setUserRole] = useState<string | null>(null);
+  const [approvalStatus, setApprovalStatus] = useState<'pending' | 'approved' | 'rejected' | null>(null);
 
   useEffect(() => {
     // Check for active session
@@ -50,12 +67,95 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  const refreshRole = async () => {
+    if (!session?.user) {
+      setUserRole(null);
+      setApprovalStatus(null);
+      setRoleLoading(false);
+      return;
+    }
+
+    setRoleLoading(true);
+    const { data, error } = await supabase
+      .from('user_roles')
+      .select('role, approval_status')
+      .eq('user_id', session.user.id)
+      .maybeSingle();
+
+    if (error) {
+      console.error('[Supabase] Failed to load role:', error.message);
+      setUserRole(null);
+      setApprovalStatus(null);
+    } else {
+      setUserRole(data?.role ?? null);
+      setApprovalStatus((data?.approval_status as 'pending' | 'approved' | 'rejected' | null) ?? null);
+    }
+
+    setRoleLoading(false);
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadRole = async () => {
+      if (!session?.user) {
+        setUserRole(null);
+        setApprovalStatus(null);
+        setRoleLoading(false);
+        return;
+      }
+
+      setRoleLoading(true);
+      const { data, error } = await supabase
+        .from('user_roles')
+        .select('role, approval_status')
+        .eq('user_id', session.user.id)
+        .maybeSingle();
+
+      if (cancelled) return;
+
+      if (error) {
+        console.error('[Supabase] Failed to load role:', error.message);
+        setUserRole(null);
+        setApprovalStatus(null);
+      } else {
+        setUserRole(data?.role ?? null);
+        setApprovalStatus((data?.approval_status as 'pending' | 'approved' | 'rejected' | null) ?? null);
+      }
+
+      setRoleLoading(false);
+    };
+
+    loadRole();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [session?.user?.id]);
+
+  const isAdmin = userRole === 'admin';
+  const isApproved = approvalStatus === 'approved';
+  const isPending = approvalStatus === 'pending' || !approvalStatus;
+  const isRejected = approvalStatus === 'rejected';
+
   const signOut = async () => {
     await supabase.auth.signOut();
   };
 
   return (
-    <AuthContext.Provider value={{ session, user, loading, signOut }}>
+    <AuthContext.Provider value={{
+      session,
+      user,
+      loading,
+      roleLoading,
+      userRole,
+      isAdmin,
+    isApproved,
+    isPending,
+    isRejected,
+    refreshRole,
+    signOut,
+  }}>
       {children}
     </AuthContext.Provider>
   );

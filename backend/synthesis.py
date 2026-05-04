@@ -4,6 +4,7 @@ import json
 import asyncio
 import torch
 import gc
+import sys
 from pathlib import Path
 from dotenv import load_dotenv
 from langchain_community.chat_models import ChatOllama
@@ -12,6 +13,11 @@ from PIL import Image
 import config
 from config import HF_TOKEN
 from ct_montage import build_ct_montage
+
+for _stream_name in ("stdout", "stderr"):
+    _stream = getattr(sys, _stream_name, None)
+    if _stream and hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
 
 os.environ["HF_TOKEN"] = HF_TOKEN
 
@@ -23,10 +29,13 @@ REPORT_MAX_TOKENS = 420
 CT_GENERATION_TIMEOUT_SECONDS = int(os.getenv("CT_GENERATION_TIMEOUT_SECONDS", "180"))
 CT_REQUEST_TIMEOUT_SECONDS = int(os.getenv("CT_REQUEST_TIMEOUT_SECONDS", "420"))
 CT_COLD_START_TIMEOUT_SECONDS = int(os.getenv("CT_COLD_START_TIMEOUT_SECONDS", "900"))
+USE_HF_CT_RATE_ENDPOINT = os.getenv("USE_HF_CT_RATE_ENDPOINT", "1").strip().lower() not in {"0", "false", "no", "off"}
+ALLOW_LOCAL_CT_FALLBACK = os.getenv("ALLOW_LOCAL_CT_FALLBACK", "1").strip().lower() not in {"0", "false", "no", "off"}
 
 # <--- NEW IMPORTS --->
 from explain import generate_explainable_image
 from xray_filter import classify_scan
+from hf_ct_rate_endpoint import generate_ct_rate_report_from_endpoint
 
 # --- 4. CT Vision Model (MedGemma fine-tuned on CT grids) ---
 # Define constants unconditionally so they are always in scope
@@ -1388,7 +1397,7 @@ class LocalSynthesisAgent:
             ct_montage = None
             ct_montage_metadata = None
 
-            if not CT_AVAILABLE:
+            if not USE_HF_CT_RATE_ENDPOINT and not CT_AVAILABLE:
                 yield json.dumps({"status": "error", "message": f"CT model weights not found at {CT_MODEL_PATH}."}) + "\n"
                 return
 
@@ -1404,7 +1413,90 @@ class LocalSynthesisAgent:
                 yield json.dumps({"status": "error", "message": f"CT montage construction failed: {e}"}) + "\n"
                 return
 
-            yield json.dumps({"status": "vision_start", "message": "CT Vision Agent building montage & running MedGemma inference..."}) + "\n"
+            use_local_ct_inference = not USE_HF_CT_RATE_ENDPOINT
+            if USE_HF_CT_RATE_ENDPOINT:
+                yield json.dumps({"status": "vision_start", "message": "Sending CT slices to the Hugging Face CT-RATE endpoint..."}) + "\n"
+                try:
+                    endpoint_result = await asyncio.to_thread(generate_ct_rate_report_from_endpoint, image_paths)
+                    vision_report = endpoint_result["final_report"]
+                    evidence_bundle["hf_ct_rate_endpoint"] = {
+                        "endpoint_url": endpoint_result.get("endpoint_url"),
+                        "model": endpoint_result.get("model"),
+                        "selected_slice_count": endpoint_result.get("selected_slice_count"),
+                        "input_slice_count": endpoint_result.get("input_slice_count"),
+                    }
+                    yield json.dumps({"status": "synthesis_start", "message": "Structuring CT-RATE endpoint output into Final Report format..."}) + "\n"
+                    final_report = self._clean_output(vision_report)
+                    preliminary_kg = build_kg_from_synthesis_report(final_report, evidence_bundle)
+                    final_report = normalize_report_sections(final_report, preliminary_kg)
+                    kg_json = build_kg_from_synthesis_report(final_report, evidence_bundle)
+
+                    explain_dir = os.path.join("out", "explained_images")
+                    os.makedirs(explain_dir, exist_ok=True)
+                    parent_folder = os.path.basename(os.path.dirname(target_image))
+                    file_name = os.path.basename(target_image)
+                    new_filename = f"{parent_folder}_{file_name}".replace(".png", "_explained.png").replace(".jpg", "_explained.jpg")
+                    explain_img_path = os.path.join(explain_dir, new_filename)
+                    reference_img_path = os.path.join(
+                        explain_dir,
+                        new_filename.replace("_explained", "_reference_montage").replace(".jpg", ".png")
+                    )
+                    try:
+                        ct_montage.save(reference_img_path)
+                    except Exception as exc:
+                        print(f"[CT Path] Could not save CT montage reference image: {exc}")
+                        reference_img_path = None
+
+                    explained_path = await asyncio.to_thread(
+                        generate_explainable_image,
+                        reference_img_path if reference_img_path else target_image,
+                        kg_json,
+                        explain_img_path,
+                        detected_modality,
+                    )
+                    explainability_trace = {
+                        "evidence_sources": {
+                            "vision_agent_findings": vision_report,
+                            "spatial_kg_evidence": kg_text_block,
+                            "visual_classifier_evidence": visual_evidence_text,
+                            "retrieval_agent_draft": draft_report,
+                            "hf_ct_rate_endpoint": evidence_bundle.get("hf_ct_rate_endpoint"),
+                        },
+                        "reasoning_steps": [
+                            f"1. Verified image modality as '{detected_modality.upper()}'.",
+                            "2. Built a fixed 4x4 CT montage so inference and explainability share the same visual reference.",
+                            "3. Sent selected uploaded CT slices to the Hugging Face CT-RATE endpoint.",
+                            "4. Normalized the endpoint output into the same FINDINGS / IMPRESSION report contract used by X-ray synthesis.",
+                            "5. Built the frontend knowledge graph from the normalized CT report plus slice metadata.",
+                            "6. Rendered CT explainability overlays on the montage reference.",
+                        ],
+                    }
+                    yield json.dumps({
+                        "status": "complete",
+                        "detected_modality": detected_modality,
+                        "requested_scan_type": scan_type,
+                        "final_report": final_report,
+                        "knowledge_graph": kg_json,
+                        "explainability": explainability_trace,
+                        "explainability_reference_image_path": reference_img_path,
+                        "explainable_image_path": explained_path if explained_path else "Normal - No highlights needed",
+                    }) + "\n"
+                    return
+                except Exception as e:
+                    if not ALLOW_LOCAL_CT_FALLBACK:
+                        print(f"[CT Path] HF CT-RATE endpoint failed: {e}")
+                        yield json.dumps({"status": "error", "message": f"CT endpoint inference failed: {e}"}) + "\n"
+                        return
+                    print(f"[CT Path] HF CT-RATE endpoint failed; falling back to local CT model: {e}")
+                    yield json.dumps({"status": "vision_retry", "message": "CT endpoint failed. Falling back to local CT model..."}) + "\n"
+                    use_local_ct_inference = True
+
+            if use_local_ct_inference and not CT_AVAILABLE:
+                yield json.dumps({"status": "error", "message": f"CT model weights not found at {CT_MODEL_PATH}."}) + "\n"
+                return
+
+            if use_local_ct_inference:
+                yield json.dumps({"status": "vision_start", "message": "CT Vision Agent building montage & running MedGemma inference..."}) + "\n"
 
             ct_timeout_seconds = _ct_request_timeout_seconds()
             try:

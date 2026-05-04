@@ -1,9 +1,10 @@
 import React from 'react';
-import { StyleSheet, View } from 'react-native';
+import { View } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { LayoutDashboard, Users, Network, Settings as SettingsIcon } from 'lucide-react-native';
 import { useTheme } from '../theme/ThemeContext';
 import { typography, fontFamily, spacing } from '../theme/colors';
+import { createShadow } from '../theme/ui';
 
 import DashboardScreen from '../screens/DashboardScreen';
 import PatientsScreen from '../screens/PatientsScreen';
@@ -20,12 +21,19 @@ export default function MainTabNavigator() {
       screenOptions={{
         headerShown: false,
         tabBarStyle: {
-          backgroundColor: theme.card,
-          borderTopColor: theme.border,
-          borderTopWidth: 1,
-          height: 68,
+          position: 'absolute',
+          left: spacing.md,
+          right: spacing.md,
+          bottom: spacing.md,
+          height: 74,
           paddingBottom: 10,
-          paddingTop: 8,
+          paddingTop: 10,
+          borderTopWidth: 0,
+          borderWidth: 1,
+          borderColor: 'rgba(255,255,255,0.72)',
+          borderRadius: 28,
+          backgroundColor: theme.backgroundElevated,
+          ...createShadow(theme, 'lg'),
         },
         tabBarActiveTintColor: theme.primary,
         tabBarInactiveTintColor: theme.mutedForeground,
@@ -33,6 +41,9 @@ export default function MainTabNavigator() {
           fontSize: 10,
           fontFamily: fontFamily.semiBold,
           marginTop: 4,
+        },
+        tabBarItemStyle: {
+          paddingVertical: 2,
         },
       }}
     >
