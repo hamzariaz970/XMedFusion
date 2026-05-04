@@ -13,6 +13,7 @@ import base64
 import sys
 import uvicorn
 from typing import List
+import re
 import config
 import subprocess
 import time
@@ -222,6 +223,13 @@ def _get_ollama_status():
             "ollama_available_models": [],
         }
 
+
+@lru_cache(maxsize=1)
+def _get_scan_classifier():
+    from xray_filter import classify_scan
+
+    return classify_scan
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     import gc
@@ -254,27 +262,130 @@ app.add_middleware(
 )
 
 UPLOAD_DIR = "uploads"
-CT_MAX_UPLOAD_FILES = int(os.getenv("CT_MAX_UPLOAD_FILES", "64"))
+CT_MAX_UPLOAD_FILES = int(os.getenv("CT_MAX_UPLOAD_FILES", "300"))
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 
-@app.post("/api/synthesize-report")
-async def synthesize_report(
-    files: List[UploadFile] = File(...),
-    # Optional frontend parameter: "xray", "ct", or "auto"
-    scan_type: str = Form("auto") 
-):
-    if len(files) > CT_MAX_UPLOAD_FILES:
-        async def too_many_ct_files():
-            yield json.dumps({
-                "status": "error",
-                "message": f"Upload limit exceeded. Upload up to {CT_MAX_UPLOAD_FILES} images per study."
-            }) + "\n"
-        return StreamingResponse(too_many_ct_files(), media_type="application/x-ndjson")
+def _natural_sort_key(text: str):
+    return [int(part) if part.isdigit() else part.lower() for part in re.split(r"(\d+)", text or "")]
 
-    image_paths = []
-    
-    # 1. Save all uploaded files to disk
+
+def _representative_sample_indices(total: int, limit: int, *, trim_top: float = 0.15, trim_bottom: float = 0.10) -> list[int]:
+    if total <= 0:
+        return []
+    if total <= limit:
+        return list(range(total))
+
+    start = int(total * trim_top)
+    end = int(total * (1.0 - trim_bottom))
+    if end <= start:
+        start, end = 0, total
+
+    usable = list(range(start, end))
+    if not usable:
+        usable = list(range(total))
+    if len(usable) <= limit:
+        return usable
+    if limit == 1:
+        return [usable[len(usable) // 2]]
+
+    positions = [round(i * (len(usable) - 1) / (limit - 1)) for i in range(limit)]
+    return [usable[pos] for pos in positions]
+
+
+def _validation_sample_indexes(total_files: int, scan_type: str) -> list[int]:
+    return list(range(total_files))
+
+
+def _find_duplicate_names(names: list[str]) -> list[str]:
+    seen = {}
+    duplicates = []
+    for name in names:
+        normalized = (name or "").strip().lower()
+        if not normalized:
+            continue
+        if normalized in seen:
+            duplicates.append(name)
+        else:
+            seen[normalized] = name
+    return duplicates
+
+
+def _validate_scan_batch(image_paths: list[str], scan_type: str, original_names: list[str] | None = None) -> dict:
+    duplicate_names = _find_duplicate_names(original_names or [])
+    if duplicate_names:
+        return {
+            "valid": False,
+            "requested_scan_type": scan_type,
+            "detected_modality": None,
+            "sampled_results": [],
+            "sampled_count": 0,
+            "counts": {"xray": 0, "ct": 0, "invalid": 0},
+            "message": f"Duplicate scan names detected. Remove repeated files such as '{duplicate_names[0]}'.",
+        }
+
+    classify_scan = _get_scan_classifier()
+    sampled_indexes = _validation_sample_indexes(len(image_paths), scan_type)
+    sampled_paths = [image_paths[idx] for idx in sampled_indexes]
+    results = []
+    counts = {"xray": 0, "ct": 0, "invalid": 0}
+
+    for idx, path in zip(sampled_indexes, sampled_paths):
+        modality, confidence = classify_scan(path)
+        counts[modality] = counts.get(modality, 0) + 1
+        results.append(
+            {
+                "index": idx,
+                "filename": os.path.basename(path),
+                "modality": modality,
+                "confidence": round(float(confidence), 4),
+            }
+        )
+
+    dominant_modality = max(("xray", "ct", "invalid"), key=lambda key: counts.get(key, 0))
+    has_invalid = counts["invalid"] > 0
+    has_mixed_valid = counts["xray"] > 0 and counts["ct"] > 0
+
+    if has_invalid and has_mixed_valid:
+        valid = False
+        message = "Uploaded files contain a mix of CT, X-ray, and invalid images. All files in the batch must belong to the same scan modality."
+    elif has_invalid:
+        valid = False
+        invalid_files = [result["filename"] for result in results if result["modality"] == "invalid"]
+        example = invalid_files[0] if invalid_files else "one or more files"
+        message = f"One or more uploads do not appear to be valid medical scans, for example '{example}'."
+    elif scan_type == "auto":
+        valid = not has_mixed_valid
+        message = (
+            "Mixed scan modalities were detected in this upload batch. All uploaded files must be either CT scans or X-rays."
+            if has_mixed_valid
+            else f"Detected {dominant_modality.upper()} study."
+        )
+    else:
+        valid = dominant_modality == scan_type and not has_mixed_valid
+        expected = "X-ray" if scan_type == "xray" else "CT"
+        actual = dominant_modality.upper()
+        message = (
+            f"Uploaded files appear to be mixed between CT and X-ray. All uploaded files must be {expected} images for this study."
+            if has_mixed_valid
+            else f"Expected a {expected} study, but sampled files look like {actual}."
+        )
+        if valid:
+            message = f"Validated {expected} study."
+
+    return {
+        "valid": valid,
+        "requested_scan_type": scan_type,
+        "detected_modality": None if has_invalid or has_mixed_valid else dominant_modality,
+        "sampled_results": results,
+        "sampled_count": len(results),
+        "counts": counts,
+        "message": message,
+    }
+
+
+async def _store_uploads(files: List[UploadFile], scan_type: str) -> list[dict]:
+    stored_uploads = []
     for file in files:
         file_id = str(uuid.uuid4())
         original_ext = os.path.splitext(file.filename or "")[1].lower()
@@ -283,8 +394,79 @@ async def synthesize_report(
 
         with open(image_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
-            
-        image_paths.append(image_path)
+
+        stored_uploads.append({
+            "original_name": file.filename or "",
+            "image_path": image_path,
+        })
+
+    if scan_type == "ct":
+        stored_uploads.sort(key=lambda item: _natural_sort_key(item["original_name"]))
+
+    return stored_uploads
+
+
+@app.post("/api/validate-upload-batch")
+async def validate_upload_batch(
+    files: List[UploadFile] = File(...),
+    scan_type: str = Form("auto")
+):
+    if scan_type == "ct" and len(files) > CT_MAX_UPLOAD_FILES:
+        return {
+            "valid": False,
+            "message": f"Upload limit exceeded. Upload up to {CT_MAX_UPLOAD_FILES} images per study.",
+            "requested_scan_type": scan_type,
+        }
+
+    stored_uploads = await _store_uploads(files, scan_type)
+    image_paths = [item["image_path"] for item in stored_uploads]
+    original_names = [item["original_name"] for item in stored_uploads]
+    try:
+        return await asyncio.to_thread(_validate_scan_batch, image_paths, scan_type, original_names)
+    finally:
+        for path in image_paths:
+            try:
+                if os.path.exists(path):
+                    os.remove(path)
+            except Exception as cleanup_error:
+                print(f"⚠️ Could not clean validation temp file {path}: {cleanup_error}")
+
+
+@app.post("/api/synthesize-report")
+async def synthesize_report(
+    files: List[UploadFile] = File(...),
+    # Optional frontend parameter: "xray", "ct", or "auto"
+    scan_type: str = Form("auto") 
+):
+    if scan_type == "ct" and len(files) > CT_MAX_UPLOAD_FILES:
+        async def too_many_ct_files():
+            yield json.dumps({
+                "status": "error",
+                "message": f"Upload limit exceeded. Upload up to {CT_MAX_UPLOAD_FILES} images per study."
+            }) + "\n"
+        return StreamingResponse(too_many_ct_files(), media_type="application/x-ndjson")
+
+    stored_uploads = await _store_uploads(files, scan_type)
+    image_paths = [item["image_path"] for item in stored_uploads]
+
+    original_names = [item["original_name"] for item in stored_uploads]
+    validation = await asyncio.to_thread(_validate_scan_batch, image_paths, scan_type, original_names)
+    if not validation.get("valid"):
+        async def invalid_batch():
+            yield json.dumps({
+                "status": "error",
+                "message": validation.get("message", "Uploaded files failed validation."),
+                "validation": validation,
+            }) + "\n"
+        for path in image_paths:
+            try:
+                if os.path.exists(path):
+                    os.remove(path)
+            except Exception as cleanup_error:
+                print(f"⚠️ Could not clean invalid upload temp file {path}: {cleanup_error}")
+        return StreamingResponse(invalid_batch(), media_type="application/x-ndjson")
+
+    effective_scan_type = validation.get("detected_modality") if scan_type == "auto" else scan_type
 
     # 2. Process scans through the shared report pipeline.
     runtime = await asyncio.to_thread(_ensure_report_agents)
@@ -294,7 +476,7 @@ async def synthesize_report(
         retrieval_agent=agents["retrieval"],
         reports_dict=runtime["reports_dict"],
         image_paths=image_paths,
-        scan_type=scan_type
+        scan_type=effective_scan_type
     )
 
     async def process_stream(generator):

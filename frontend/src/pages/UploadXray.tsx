@@ -23,7 +23,8 @@ import {
   Download,
   FileDown,
   ArrowRight,
-  UserCheck
+  UserCheck,
+  X
 } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -48,11 +49,24 @@ import { getApiBase } from "@/lib/apiConfig";
 
 type ProcessingStep = 'idle' | 'uploading' | 'analyzing' | 'complete';
 type ScanType = 'auto' | 'xray' | 'ct';
-const CT_MAX_UPLOAD_FILES = 64;
-const CT_MODEL_SLICE_COUNT = 16;
+type ClassifiedModality = 'xray' | 'ct' | 'invalid' | null;
+const CT_MAX_UPLOAD_FILES = 16;
+const CT_MODEL_SLICE_COUNT = 1;
+const CT_UPLOAD_GUIDANCE_LIMIT = 300;
 
 interface ExtendedParsedReport extends ParsedReport {
   recommendation?: string;
+}
+
+interface UploadValidationResult {
+  valid: boolean;
+  message?: string;
+  detected_modality?: string | null;
+  sampled_results?: Array<{
+    filename: string;
+    modality: string;
+    confidence: number;
+  }>;
 }
 
 const XRAY_AGENT_STEPS = [
@@ -63,9 +77,10 @@ const XRAY_AGENT_STEPS = [
 ];
 
 const CT_AGENT_STEPS = [
-  { id: 'kg', label: 'Clinical Graph Builder', description: 'Preparing CT montage and report-derived graph scaffold...', icon: Network, color: 'text-purple-500', progress: 20 },
-  { id: 'vision', label: 'CT Vision Agent (MedGemma)', description: 'Building CT slice montage and running MedGemma inference...', icon: Brain, color: 'text-blue-500', progress: 55 },
-  { id: 'synthesis', label: 'Report Synthesis', description: 'Structuring CT findings into FINDINGS / IMPRESSION format...', icon: Sparkles, color: 'text-emerald-500', progress: 90 }
+  { id: 'kg', label: 'Knowledge Graph Agent', description: 'Preparing CT montage and report-derived graph scaffold...', icon: Network, color: 'text-purple-500', progress: 20 },
+  { id: 'vision', label: 'Vision Agent', description: 'Analyzing a representative CT slice...', icon: Brain, color: 'text-blue-500', progress: 45 },
+  { id: 'draft', label: 'Retrieval and Draft Agent', description: 'Reconciling report phrasing with prior study patterns...', icon: Database, color: 'text-amber-500', progress: 70 },
+  { id: 'synthesis', label: 'Synthesis Agent', description: 'Composing final CT report and graph outputs...', icon: Sparkles, color: 'text-emerald-500', progress: 90 }
 ];
 
 const AGENT_STEPS = XRAY_AGENT_STEPS; // Legacy alias
@@ -73,13 +88,117 @@ const AGENT_STEPS = XRAY_AGENT_STEPS; // Legacy alias
 const getAgentSteps = (scanType: string) =>
   scanType === 'ct' ? CT_AGENT_STEPS : XRAY_AGENT_STEPS;
 
+const getModalityStudyLabel = (modality: ClassifiedModality, fallbackScanType: ScanType) => {
+  if (modality === "ct") return "CT Study";
+  if (modality === "xray") return "Multi-View X-Ray";
+  if (fallbackScanType === "ct") return "CT Study";
+  if (fallbackScanType === "xray") return "Multi-View X-Ray";
+  if (fallbackScanType === "auto") return "Medical Scan";
+  return "Multi-View X-Ray";
+};
+
+const getModalityUnitLabel = (modality: ClassifiedModality, fallbackScanType: ScanType) => {
+  if (modality === "ct") return "Slices";
+  if (modality === "xray") return "Views";
+  if (fallbackScanType === "ct") return "Slices";
+  if (fallbackScanType === "xray") return "Views";
+  if (fallbackScanType === "auto") return "Images";
+  return "Views";
+};
+
+const getModalityBadgeLabel = (modality: ClassifiedModality, fallbackScanType: ScanType) => {
+  if (modality === "ct") return "CT";
+  if (modality === "xray") return "X-RAY";
+  if (fallbackScanType === "ct") return "CT";
+  if (fallbackScanType === "xray") return "X-RAY";
+  return "AUTO";
+};
+
+const getValidationSampleCount = (fileCount: number) => Math.max(0, fileCount);
+
+const findDuplicateFileName = (files: File[]) => {
+  const seen = new Set<string>();
+  for (const file of files) {
+    const normalized = file.name.trim().toLowerCase();
+    if (!normalized) continue;
+    if (seen.has(normalized)) {
+      return file.name;
+    }
+    seen.add(normalized);
+  }
+  return null;
+};
+
+const UPLOAD_LIMIT_NOTE = "X-ray accepts up to 2 views per study. CT accepts up to 300 uploaded slices, and the backend selects 1 representative slice for report generation.";
+
+const fetchExplainabilityNarrative = async (
+  findings: string,
+  impression: string,
+  modality: string | null,
+) => {
+  const API_BASE_URL = await getApiBase();
+  const response = await fetch(`${API_BASE_URL}/api/explain`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "ngrok-skip-browser-warning": "true",
+    },
+    body: JSON.stringify({
+      findings,
+      impression,
+      modality: modality || "xray",
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to generate explanation");
+  }
+
+  const explanationData = await response.json();
+  if (explanationData.error) {
+    throw new Error(explanationData.error);
+  }
+
+  return explanationData.explanation as string;
+};
+
+const validateUploadBatch = async (
+  files: File[],
+  scanType: ScanType,
+): Promise<UploadValidationResult> => {
+  const API_BASE_URL = await getApiBase();
+  const formData = new FormData();
+  files.forEach((file) => formData.append("files", file));
+  formData.append("scan_type", scanType);
+
+  const response = await fetch(`${API_BASE_URL}/api/validate-upload-batch`, {
+    method: "POST",
+    body: formData,
+    headers: { "ngrok-skip-browser-warning": "true" },
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to validate upload batch");
+  }
+
+  return response.json();
+};
+
 
 const UploadXray = () => {
   const {
     uploadedFile,
     previewUrl,
+    previewUrls,
+    referenceImageUrl,
     report,
     knowledgeGraphData,
+    heatmapData,
+    detectedModality,
+    explainabilityData,
+    currentScanId,
+    feedbackStatus,
+    setFeedbackStatus,
     setAnalysisResults,
     setCurrentScanId,
     resetAnalysis
@@ -94,6 +213,9 @@ const UploadXray = () => {
   const [currentStep, setCurrentStep] = useState<ProcessingStep>(report ? 'complete' : 'idle');
   const [activeAgentIndex, setActiveAgentIndex] = useState(0);
   const [progress, setProgress] = useState(report ? 100 : 0);
+  const [isValidatingUpload, setIsValidatingUpload] = useState(false);
+  const [lastClassifiedModality, setLastClassifiedModality] = useState<ClassifiedModality>(null);
+  const [validationSampleCount, setValidationSampleCount] = useState(0);
 
   // NEW: State to track which scan type the user selected
   const [scanType, setScanType] = useState<ScanType>('auto');
@@ -102,6 +224,10 @@ const UploadXray = () => {
   const displayFile = uploadedFile || (tempFiles.length > 0 ? tempFiles[0] : null);
   const displayUrl = previewUrl || (tempPreviews.length > 0 ? tempPreviews[0] : null);
   const isStudyStaged = currentStep === 'idle' && tempFiles.length > 0 && !report;
+  const stagedModality: ClassifiedModality =
+    lastClassifiedModality === "invalid"
+      ? null
+      : lastClassifiedModality || (scanType === "auto" ? null : scanType);
 
   const parseReportText = (text: string | undefined): ExtendedParsedReport => {
     if (!text) {
@@ -143,7 +269,10 @@ const UploadXray = () => {
       return;
     }
 
-    const effectiveScanType = requestedScanType || scanType;
+    const effectiveScanType =
+      requestedScanType === "auto" && lastClassifiedModality && lastClassifiedModality !== "invalid"
+        ? (lastClassifiedModality as ScanType)
+        : (requestedScanType || scanType);
 
     // Reset previous analysis state to prevent old images/reports from persisting
     resetAnalysis();
@@ -153,8 +282,8 @@ const UploadXray = () => {
 
     // Convert to array and handle previews
     const fileArray = Array.from(files);
-    if (effectiveScanType === "ct" && fileArray.length > CT_MAX_UPLOAD_FILES) {
-      toast.error(`CT uploads are limited to ${CT_MAX_UPLOAD_FILES} slices per study.`);
+    if (effectiveScanType === "ct" && fileArray.length > CT_UPLOAD_GUIDANCE_LIMIT) {
+      toast.error(`CT uploads are limited to ${CT_UPLOAD_GUIDANCE_LIMIT} slices per study.`);
       return;
     }
     const newPreviews = fileArray.map(f => URL.createObjectURL(f));
@@ -268,6 +397,21 @@ const UploadXray = () => {
         const data = finalReportData;
         const parsedReport = parseReportText(data.final_report);
         const persistedScanType = data.detected_modality || (effectiveScanType === "auto" ? "unknown" : effectiveScanType);
+        let explainabilityPayload = data.explainability || null;
+
+        try {
+          const automatedNarrative = await fetchExplainabilityNarrative(
+            parsedReport.findings,
+            parsedReport.impression,
+            data.detected_modality || null,
+          );
+          explainabilityPayload = {
+            ...(explainabilityPayload || {}),
+            automated_narrative: automatedNarrative,
+          };
+        } catch (explainError) {
+          console.error("Explainability Narrative Error:", explainError);
+        }
 
         let insertedScanId: string | null = null;
         try {
@@ -416,7 +560,8 @@ const UploadXray = () => {
           toast.error(dbError instanceof Error ? dbError.message : "Analysis completed, but saving failed.");
         }
 
-        // Update UI with results
+      // Update UI with results
+        setLastClassifiedModality((data.detected_modality as ClassifiedModality | null) || null);
         setAnalysisResults(
           fileArray[0],
           newPreviews[0],
@@ -424,7 +569,7 @@ const UploadXray = () => {
           data.knowledge_graph,
           data.heatmap,
           data.detected_modality || null,
-          data.explainability || null,
+          explainabilityPayload,
           data.reference_image || null,
           insertedScanId,
           newPreviews
@@ -445,16 +590,20 @@ const UploadXray = () => {
       setTempPreviews([]);
       setCurrentStep('idle');
       setProgress(0);
+      setLastClassifiedModality(null);
     }
-  }, [setAnalysisResults, setCurrentScanId, tempPreviews, scanType, selectedPatient, refreshPatients, user]);
+  }, [lastClassifiedModality, setAnalysisResults, setCurrentScanId, tempPreviews, scanType, selectedPatient, refreshPatients, user]);
 
-  const stageFiles = useCallback((files: FileList | File[], requestedScanType?: ScanType, append = false) => {
+  const stageFiles = useCallback(async (files: FileList | File[], requestedScanType?: ScanType, append = false) => {
     if (!selectedPatient) {
       alert("Please select a patient from the Patients dashboard first.");
       return;
     }
 
-    const effectiveScanType = requestedScanType || scanType;
+    const effectiveScanType =
+      append && lastClassifiedModality && lastClassifiedModality !== "invalid"
+        ? (lastClassifiedModality as ScanType)
+        : (requestedScanType || scanType);
     const incomingFiles = Array.from(files);
     if (!incomingFiles.length) return;
 
@@ -462,27 +611,111 @@ const UploadXray = () => {
 
     const mergedFiles = append ? [...tempFiles, ...incomingFiles] : incomingFiles;
     
-    // Limits based on scan type
-    const maxFiles = effectiveScanType === 'ct' ? CT_MAX_UPLOAD_FILES : 5; // Allow up to 5 views for X-ray
+    const hasLockedModality = !!lastClassifiedModality && lastClassifiedModality !== "invalid";
+    const maxFiles =
+      effectiveScanType === 'ct' || effectiveScanType === 'auto'
+        ? CT_UPLOAD_GUIDANCE_LIMIT
+        : 2;
     
     if (mergedFiles.length > maxFiles) {
-      toast.error(`${effectiveScanType === 'ct' ? 'CT' : 'X-ray'} uploads are limited to ${maxFiles} images.`);
+      toast.error(
+        effectiveScanType === 'ct' || effectiveScanType === 'auto'
+          ? `CT uploads are limited to ${maxFiles} slices. Upload the full chest study in order and the backend will choose ${CT_MODEL_SLICE_COUNT} representative thoracic slice automatically.`
+          : `X-ray uploads are limited to ${maxFiles} images.`
+      );
       return;
     }
 
+    const duplicateFileName = findDuplicateFileName(mergedFiles);
+    if (duplicateFileName) {
+      toast.error(`Duplicate scan name detected: ${duplicateFileName}. Remove repeated files before uploading.`);
+      return;
+    }
+
+    const filesToValidate =
+      append && lastClassifiedModality && lastClassifiedModality !== "invalid"
+        ? incomingFiles
+        : mergedFiles;
+
     tempPreviews.forEach((preview) => URL.revokeObjectURL(preview));
     const mergedPreviews = mergedFiles.map((file) => URL.createObjectURL(file));
-
     setTempFiles(mergedFiles);
     setTempPreviews(mergedPreviews);
     setCurrentStep('idle');
     setProgress(0);
     setActiveAgentIndex(0);
-  }, [resetAnalysis, scanType, selectedPatient, tempFiles, tempPreviews]);
+
+    try {
+      setIsValidatingUpload(true);
+      setValidationSampleCount(getValidationSampleCount(filesToValidate.length));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      const validation = await validateUploadBatch(filesToValidate, effectiveScanType);
+      if (!validation.valid) {
+        setLastClassifiedModality((validation.detected_modality as ClassifiedModality | null) || null);
+        mergedPreviews.forEach((preview) => URL.revokeObjectURL(preview));
+        setTempFiles([]);
+        setTempPreviews([]);
+        toast.error(validation.message || "Uploaded files failed validation.");
+        return;
+      }
+
+      setLastClassifiedModality((validation.detected_modality as ClassifiedModality | null) || (effectiveScanType === "auto" ? null : effectiveScanType));
+      const resolvedModality = (validation.detected_modality as ClassifiedModality | null) || (effectiveScanType === "auto" ? null : effectiveScanType);
+      if (
+        !hasLockedModality &&
+        resolvedModality === "xray" &&
+        mergedFiles.length > 2
+      ) {
+        mergedPreviews.forEach((preview) => URL.revokeObjectURL(preview));
+        setTempFiles([]);
+        setTempPreviews([]);
+        setLastClassifiedModality("xray");
+        toast.error("X-ray uploads are limited to 2 images.");
+        return;
+      }
+      const validatedCount =
+        typeof validation.sampled_results?.length === "number"
+          ? validation.sampled_results.length
+          : getValidationSampleCount(filesToValidate.length);
+      setValidationSampleCount(validatedCount);
+      if (effectiveScanType === "auto" && validation.detected_modality) {
+        const detectedLabel = validation.detected_modality === "ct" ? "CT" : "X-ray";
+        toast.success(`Detected ${detectedLabel} study.`);
+      }
+    } catch (validationError) {
+      console.error("Upload validation failed:", validationError);
+      mergedPreviews.forEach((preview) => URL.revokeObjectURL(preview));
+      setTempFiles([]);
+      setTempPreviews([]);
+      toast.error("Could not validate the selected files. Ensure backend is running.");
+      return;
+    } finally {
+      setIsValidatingUpload(false);
+    }
+  }, [lastClassifiedModality, resetAnalysis, scanType, selectedPatient, tempFiles, tempPreviews]);
 
   const handleQueuedFileSelection = useCallback((files: FileList | File[]) => {
     stageFiles(files, scanType, tempFiles.length > 0);
   }, [scanType, stageFiles, tempFiles.length]);
+
+  const removeStagedFile = useCallback((index: number) => {
+    const nextFiles = [...tempFiles];
+    const nextPreviews = [...tempPreviews];
+    const [removedPreview] = nextPreviews.splice(index, 1);
+    nextFiles.splice(index, 1);
+    if (removedPreview) {
+      URL.revokeObjectURL(removedPreview);
+    }
+    setTempFiles(nextFiles);
+    setTempPreviews(nextPreviews);
+    setValidationSampleCount(0);
+    if (nextFiles.length === 0) {
+      setLastClassifiedModality(null);
+      setCurrentStep('idle');
+      setProgress(0);
+      setActiveAgentIndex(0);
+    }
+  }, [tempFiles, tempPreviews]);
 
   // AUTO-TRIGGER: When coming from Patient Dashboard via Upload Scan button
   useEffect(() => {
@@ -511,13 +744,15 @@ const UploadXray = () => {
     setCurrentStep('idle');
     setProgress(0);
     setActiveAgentIndex(0);
+    setIsValidatingUpload(false);
+    setLastClassifiedModality(null);
+    setValidationSampleCount(0);
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
   }, [resetAnalysis, tempPreviews]);
 
   const extendedReport = report as ExtendedParsedReport | null;
-  const { feedbackStatus, setFeedbackStatus } = useAnalysis();
 
   // ------------------------------------------------------------------
   // DOWNLOAD HANDLERS (FIXED PDF WRAPPING)
@@ -693,6 +928,22 @@ const UploadXray = () => {
             <div className="space-y-6">
               <Card className="surface-card overflow-hidden">
                 <CardContent className="p-4">
+                  <input
+                    id="file-input"
+                    type="file"
+                    className="hidden"
+                    accept="image/*"
+                    multiple
+                    ref={fileInputRef}
+                    disabled={!selectedPatient}
+                    onChange={(e) => {
+                      if (e.target.files?.length) {
+                        handleQueuedFileSelection(e.target.files);
+                      }
+                      e.currentTarget.value = "";
+                    }}
+                  />
+
                   <Tabs
                     defaultValue="auto"
                     value={scanType}
@@ -755,21 +1006,6 @@ const UploadXray = () => {
                         }) : undefined}
                         onClick={selectedPatient ? openFilePicker : undefined}
                       >
-                        <input
-                          id="file-input"
-                          type="file"
-                          className="hidden"
-                          accept="image/*"
-                          multiple
-                          ref={fileInputRef}
-                          disabled={!selectedPatient}
-                          onChange={(e) => {
-                            if (e.target.files?.length) {
-                              handleQueuedFileSelection(e.target.files);
-                            }
-                            e.currentTarget.value = "";
-                          }}
-                        />
                         <div className="text-center">
                           <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10 text-primary shadow-sm">
                             <Upload className="w-8 h-8" />
@@ -784,8 +1020,17 @@ const UploadXray = () => {
                             <span className="medical-chip">Multi-image</span>
                           </div>
                           <p className="mt-3 text-xs text-muted-foreground">
-                            CT studies can include up to {CT_MAX_UPLOAD_FILES} uploaded slices. The CT model samples up to {CT_MODEL_SLICE_COUNT} representative slices into one montage for inference and explainability.
+                            CT studies can include up to {CT_UPLOAD_GUIDANCE_LIMIT} uploaded slices. Upload the full chest series in order and the backend will automatically choose {CT_MODEL_SLICE_COUNT} representative thoracic slice for report generation and explainability.
                           </p>
+                          <p className="mt-2 text-xs font-medium text-foreground/80">
+                            {UPLOAD_LIMIT_NOTE}
+                          </p>
+                          {isValidatingUpload && (
+                            <div className="mt-4 inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/5 px-3 py-1.5 text-xs font-medium text-primary">
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              Running input classifier on {validationSampleCount || 1} {validationSampleCount === 1 ? "image" : "images"}...
+                            </div>
+                          )}
                         </div>
                       </div>
                     </>
@@ -806,11 +1051,11 @@ const UploadXray = () => {
                         )}
 
                         {/* PREVIEW NAVIGATION (Before and After Analysis) */}
-                        {((tempPreviews.length > 1 && !report) || (useAnalysis().previewUrls.length > 1 && !!report)) && (
+                        {((tempPreviews.length > 1 && !report) || (previewUrls.length > 1 && !!report)) && (
                           <div className="absolute bottom-4 left-0 right-0 flex justify-center gap-1.5 px-4 overflow-x-auto pb-2 z-20">
-                             {(report ? useAnalysis().previewUrls : tempPreviews).map((p, idx) => {
+                             {(report ? previewUrls : tempPreviews).map((p, idx) => {
                                const isActive = report 
-                                 ? p === useAnalysis().previewUrl 
+                                 ? p === previewUrl 
                                  : p === displayUrl;
                                return (
                                  <div 
@@ -818,26 +1063,21 @@ const UploadXray = () => {
                                    className={cn(
                                      "w-12 h-12 rounded-lg border-2 overflow-hidden cursor-pointer transition-all shrink-0 bg-black shadow-lg",
                                      isActive ? "border-primary scale-110 shadow-glow ring-2 ring-primary/20" : "border-white/20 opacity-70 hover:opacity-100 hover:scale-105"
-                                   )}
-                                   onClick={(e) => {
-                                     e.stopPropagation();
-                                     if (report) {
-                                       // After analysis, we just update the main preview in context if needed
-                                       // Actually the context only has ONE previewUrl for the heatmap logic etc.
-                                       // For now, let's just let them swap the primary preview in the UI
-                                       // by updating the context's previewUrl.
-                                       const ctx = useAnalysis();
-                                       ctx.setAnalysisResults(
-                                         ctx.uploadedFile!,
+                                 )}
+                                 onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (report) {
+                                       setAnalysisResults(
+                                         uploadedFile!,
                                          p,
-                                         ctx.report!,
-                                         ctx.knowledgeGraphData,
-                                         ctx.heatmapData,
-                                         ctx.detectedModality,
-                                         ctx.explainabilityData,
-                                         ctx.referenceImageUrl,
-                                         ctx.currentScanId,
-                                         ctx.previewUrls
+                                         report!,
+                                         knowledgeGraphData,
+                                         heatmapData,
+                                         detectedModality,
+                                         explainabilityData,
+                                         referenceImageUrl,
+                                         currentScanId,
+                                         previewUrls
                                        );
                                      } else {
                                        // Before analysis, swap order in temp state
@@ -853,6 +1093,18 @@ const UploadXray = () => {
                                    }}
                                  >
                                    <img src={p} alt={`View ${idx+1}`} className="w-full h-full object-cover" />
+                                   {!report && (
+                                     <button
+                                       type="button"
+                                       className="absolute right-0.5 top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-black/75 text-white transition hover:bg-destructive"
+                                       onClick={(e) => {
+                                         e.stopPropagation();
+                                         removeStagedFile(idx);
+                                       }}
+                                     >
+                                       <X className="h-3 w-3" />
+                                     </button>
+                                   )}
                                  </div>
                                );
                              })}
@@ -864,24 +1116,35 @@ const UploadXray = () => {
                         <div className="mb-4 rounded-[22px] border border-primary/20 bg-primary/5 p-4 animate-in fade-in slide-in-from-top-2">
                           <div className="flex items-center gap-3 mb-2">
                             <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center">
-                              <Upload className="h-4 w-4 text-primary" />
+                              {isValidatingUpload ? (
+                                <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                              ) : (
+                                <Upload className="h-4 w-4 text-primary" />
+                              )}
                             </div>
                             <div>
                               <p className="text-sm font-bold text-foreground">
-                                {scanType === 'ct' ? 'CT Study' : 'Multi-View X-Ray'} Staged
+                                {getModalityStudyLabel(stagedModality, scanType)} Staged
                               </p>
                               <p className="text-xs text-muted-foreground">
-                                {tempFiles.length} file{tempFiles.length === 1 ? "" : "s"} ready for analysis
+                                {isValidatingUpload
+                                  ? `Running input classifier on ${validationSampleCount || 1} ${validationSampleCount === 1 ? "image" : "images"}...`
+                                  : `${tempFiles.length} file${tempFiles.length === 1 ? "" : "s"} ready for analysis`}
                               </p>
+                              {!isValidatingUpload && (
+                                <p className="text-[11px] text-muted-foreground">
+                                  {UPLOAD_LIMIT_NOTE}
+                                </p>
+                              )}
                             </div>
                           </div>
                           
                           <div className="flex gap-2">
-                             <Button variant="outline" size="sm" className="flex-1 h-9 rounded-xl" onClick={openFilePicker}>
+                             <Button variant="outline" size="sm" className="flex-1 h-9 rounded-xl" onClick={openFilePicker} disabled={isValidatingUpload}>
                                 <Upload className="w-3.5 h-3.5 mr-2" />
-                                Add {scanType === 'ct' ? 'Slices' : 'Views'}
+                                Add {getModalityUnitLabel(stagedModality, scanType)}
                              </Button>
-                             <Button size="sm" className="flex-1 h-9 rounded-xl shadow-glow" onClick={() => processFiles(tempFiles, scanType)}>
+                             <Button size="sm" className="flex-1 h-9 rounded-xl shadow-glow" onClick={() => processFiles(tempFiles, scanType)} disabled={isValidatingUpload}>
                                 <Brain className="w-3.5 h-3.5 mr-2" />
                                 Start Analysis
                              </Button>
@@ -903,7 +1166,7 @@ const UploadXray = () => {
                             </Badge>
                           )}
                           <Badge variant="outline" className="h-6 uppercase font-bold text-[10px]">
-                            {scanType}
+                            {getModalityBadgeLabel(stagedModality, scanType)}
                           </Badge>
                           
                           <Button 

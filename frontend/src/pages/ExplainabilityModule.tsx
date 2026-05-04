@@ -23,13 +23,14 @@ const ExplainabilityModule = () => {
   const modalityLabel = detectedModality === "ct" ? "CT scan" : "X-ray";
   const inputPanelLabel = detectedModality === "ct" ? "Model Input Montage" : "Original Scan";
   const inputPanelHint = detectedModality === "ct"
-    ? "The exact CT montage reviewed by MedGemma"
+    ? "The exact CT montage used by the CT vision stack"
     : "The original study used for analysis";
 
   // Parse the report to extract findings and impression for context
   const extendedReport = report as any; // Cast temporarily if interface isn't exported here
   const findings = extendedReport?.findings || "No findings recorded.";
   const impression = extendedReport?.impression || "No impression recorded.";
+  const precomputedNarrative = explainabilityData?.automated_narrative || null;
 
   const handleBackToUpload = () => navigate("/upload");
 
@@ -64,7 +65,8 @@ const ExplainabilityModule = () => {
 
       return data.explanation;
     },
-    enabled: !!displayReferenceImage,
+    enabled: !!displayReferenceImage && !precomputedNarrative,
+    initialData: precomputedNarrative,
   });
 
   return (

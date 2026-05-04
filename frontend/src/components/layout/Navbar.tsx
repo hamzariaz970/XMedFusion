@@ -1,12 +1,11 @@
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { Activity, Upload, Network, Menu, X, Users, FileSearch, LogIn, LogOut, ShieldCheck, Brain, Plus, Loader2, LayoutDashboard } from "lucide-react";
-import { useState, useEffect } from "react";
+import { Activity, Upload, Network, Menu, X, Users, FileSearch, LogIn, LogOut, ShieldCheck, Plus, Loader2, LayoutDashboard } from "lucide-react";
+import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { usePatientContext } from "@/context/PatientContext";
 import { useAuth } from "@/context/AuthContext";
 import { useAnalysis } from "@/context/AnalysisContext";
-import { supabase } from "@/lib/supabaseClient";
 import { toast } from "sonner";
 
 const navItems = [
@@ -24,23 +23,11 @@ export const Navbar = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const [isOpen, setIsOpen] = useState(false);
-  const { session, isAdmin, isDoctor, user, signOut: authSignOut } = useAuth();
+  const { session, isAdmin, signOut: authSignOut } = useAuth();
   const { selectedPatient, setSelectedPatient } = usePatientContext();
   const { report, currentScanId } = useAnalysis();
   const hasReport = !!report || !!currentScanId;
-  const [hilTaskCount, setHilTaskCount] = useState(0);
   const [signingOut, setSigningOut] = useState(false);
-
-  useEffect(() => {
-    if (!user || !isDoctor) return;
-    const fetchHilTasks = async () => {
-      const { data, error } = await supabase.from("hil_tasks").select("id").eq("doctor_id", user.id).in("status", ["assigned", "in_progress"]);
-      if (!error && data) setHilTaskCount(data.length);
-    };
-    fetchHilTasks();
-    const interval = setInterval(fetchHilTasks, 30000);
-    return () => clearInterval(interval);
-  }, [user, isDoctor]);
 
   const handleSignOut = async () => {
     setSigningOut(true);
@@ -105,15 +92,6 @@ export const Navbar = () => {
                 </Button>
               </Link>
             )}
-            {session && isDoctor && hilTaskCount > 0 && (
-              <Link to={`/patients`}>
-                <Button variant="ghost" size="sm" className="gap-2 relative rounded-full">
-                  <Brain className="w-4 h-4" />
-                  HIL
-                  <span className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-primary text-primary-foreground text-xs flex items-center justify-center animate-pulse">{hilTaskCount}</span>
-                </Button>
-              </Link>
-            )}
             {session ? (
               <Button variant="outline" size="sm" className="gap-2 rounded-full" onClick={handleSignOut} disabled={signingOut}>
                 {signingOut ? <Loader2 className="w-4 h-4 animate-spin" /> : <LogOut className="w-4 h-4" />}
@@ -164,15 +142,6 @@ export const Navbar = () => {
                   <Button variant={location.pathname === "/admin" ? "default" : "ghost"} className="w-full justify-start gap-2">
                     <ShieldCheck className="w-4 h-4" />
                     Admin
-                  </Button>
-                </Link>
-              )}
-              {session && isDoctor && hilTaskCount > 0 && (
-                <Link to="/patients" onClick={() => setIsOpen(false)}>
-                  <Button variant="ghost" className="w-full justify-start gap-2">
-                    <Brain className="w-4 h-4" />
-                    HIL Tasks
-                    <span className="ml-auto rounded-full bg-primary px-2 py-0.5 text-xs text-primary-foreground">{hilTaskCount}</span>
                   </Button>
                 </Link>
               )}

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Layout } from "@/components/layout/Layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -100,9 +100,8 @@ const severityConfig = {
 };
 
 const PatientDashboard = () => {
-  const { patients, selectedPatient, setSelectedPatient, refreshPatients, setPendingUploadFiles, setPendingScanType } = usePatientContext();
+  const { patients, selectedPatient, setSelectedPatient, refreshPatients, setPendingScanType } = usePatientContext();
   const navigate = useNavigate();
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [scans, setScans] = useState<MedicalScan[]>([]);
@@ -171,12 +170,10 @@ const PatientDashboard = () => {
     fetchScans();
   }, [selectedPatient]);
 
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files.length > 0) {
-      setPendingUploadFiles(Array.from(e.target.files));
-      setPendingScanType(dialogScanType);
-      navigate('/upload');
-    }
+  const handleUploadScanClick = () => {
+    setPendingScanType(dialogScanType);
+    setIsPatientDialogOpen(false);
+    navigate('/upload');
   };
 
   const handleAddPatient = async (e: React.FormEvent) => {
@@ -599,15 +596,7 @@ const PatientDashboard = () => {
                           <TabsTrigger value="ct" className="text-xs px-3 h-7 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">CT Scan</TabsTrigger>
                         </TabsList>
                       </Tabs>
-                      <input
-                        type="file"
-                        multiple
-                        className="hidden"
-                        ref={fileInputRef}
-                        onChange={handleFileSelect}
-                        accept="image/*"
-                      />
-                      <Button onClick={() => fileInputRef.current?.click()} className="gap-2 shadow-glow">
+                      <Button onClick={handleUploadScanClick} className="gap-2 shadow-glow">
                         <Upload className="w-4 h-4" />
                         Upload Scan
                       </Button>
