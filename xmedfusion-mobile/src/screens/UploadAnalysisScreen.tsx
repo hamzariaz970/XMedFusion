@@ -13,7 +13,7 @@ import {
 import * as ImagePicker from 'expo-image-picker';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import { useReportStore } from '../store/reportStore';
 import Svg, { Circle, Line, Text as SvgText, G } from 'react-native-svg';
 import { calculateLayout, nodeTypeColors } from './KnowledgeGraphScreen';
@@ -38,6 +38,8 @@ import {
 import { useTheme } from '../theme/ThemeContext';
 import { spacing, radius, typography, fontFamily } from '../theme/colors';
 import { uploadXRay, StreamChunk } from '../api/api';
+import { usePatientContext } from '../context/PatientContext';
+import { useAnalysis } from '../context/AnalysisContext';
 
 type AnalysisStep = {
   id: string;
@@ -61,7 +63,10 @@ const initialSteps: AnalysisStep[] = [
 
 export default function UploadAnalysisScreen() {
   const navigation = useNavigation<any>();
+  const route = useRoute<any>();
   const { theme, isDark } = useTheme();
+  const { selectedPatient, setSelectedPatient } = usePatientContext();
+  const { setAnalysisResults, resetAnalysis: resetSharedAnalysis } = useAnalysis();
   const [phase, setPhase] = useState<'idle' | 'analyzing' | 'done'>('idle');
   const [steps, setSteps] = useState<AnalysisStep[]>(initialSteps);
   const [imageUri, setImageUri] = useState<string | null>(null);
@@ -73,6 +78,13 @@ export default function UploadAnalysisScreen() {
   const [rawKgData, setRawKgData] = useState<any>(null);
 
   const addReport = useReportStore((state) => state.addReport);
+
+  React.useEffect(() => {
+    const routePatient = route.params?.patient;
+    if (routePatient) {
+      setSelectedPatient(routePatient);
+    }
+  }, [route.params, setSelectedPatient]);
 
   const exportPdf = async () => {
     if (report.length === 0) return;
@@ -193,6 +205,7 @@ export default function UploadAnalysisScreen() {
   };
 
   const handleUpload = async (uri: string) => {
+    resetSharedAnalysis();
     setImageUri(uri);
     setPhase('analyzing');
     setSteps(initialSteps);
@@ -201,7 +214,7 @@ export default function UploadAnalysisScreen() {
     setHeatmap(null);
     setRawKgData(null);
 
-    await uploadXRay(uri, (chunk: StreamChunk) => {
+    await uploadXRay(uri, 'xray', (chunk: StreamChunk) => {
       setSteps(prev => {
         const next = [...prev];
         if (chunk.status === 'validating') {
@@ -226,7 +239,7 @@ export default function UploadAnalysisScreen() {
 
           addReport({
             id: Math.random().toString(36).substr(2, 9),
-            patientId: 'PT-' + Math.floor(1000 + Math.random() * 9000),
+            patientId: selectedPatient?.id || 'PT-' + Math.floor(1000 + Math.random() * 9000),
             date: new Date().toISOString(),
             findings: findingsText,
             impression: impressionText,
@@ -257,6 +270,23 @@ export default function UploadAnalysisScreen() {
         }
 
         setReport(sections);
+        const findings = sections.find((section) => section.title === 'Findings')?.content || '';
+        const impression = sections.find((section) => section.title === 'Impression')?.content || chunk.final_report;
+        setAnalysisResults(
+          uri,
+          {
+            findings,
+            impression,
+            labels: [],
+          },
+          chunk.knowledge_graph || null,
+          chunk.heatmap || null,
+          'xray',
+          chunk.explainability || null,
+          uri,
+          null,
+          [uri]
+        );
         setPhase('done');
       }
 
@@ -271,6 +301,7 @@ export default function UploadAnalysisScreen() {
   };
 
   const reset = () => {
+    resetSharedAnalysis();
     setPhase('idle');
     setSteps(initialSteps);
     setImageUri(null);
@@ -304,13 +335,19 @@ export default function UploadAnalysisScreen() {
       </View>
 
       <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
+        {selectedPatient ? (
+          <View style={s.patientBanner}>
+            <Text style={s.patientBannerTitle}>{selectedPatient.name}</Text>
+            <Text style={s.patientBannerMeta}>{selectedPatient.id} - {selectedPatient.age} / {selectedPatient.gender}</Text>
+          </View>
+        ) : null}
         {/* Upload Area */}
         {phase === 'idle' && (
           <>
             <TouchableOpacity style={s.uploadBox} activeOpacity={0.75} onPress={pickImage}>
               <ImagePlus color={theme.primary} size={48} strokeWidth={1.5} />
               <Text style={s.uploadTitle}>Tap to Select X-Ray</Text>
-              <Text style={s.uploadSubtitle}>JPEG, PNG or DICOM · Max 20MB</Text>
+              <Text style={s.uploadSubtitle}>JPEG, PNG or DICOM - Max 20MB</Text>
             </TouchableOpacity>
 
             <View style={s.orRow}>
@@ -389,7 +426,7 @@ export default function UploadAnalysisScreen() {
                     </View>
                     <Text style={s.stepLabel}>{step.label}</Text>
                     <Text style={[s.stepStatus, { color: stepStatusColor(step.status) }]}>
-                      {step.status === 'done' ? 'Done' : step.status === 'running' ? 'Running' : step.status === 'error' ? 'Failed' : '—'}
+                      {step.status === 'done' ? 'Done' : step.status === 'running' ? 'Running' : step.status === 'error' ? 'Failed' : 'Idle'}
                     </Text>
                   </View>
                 ))}
@@ -507,6 +544,16 @@ export default function UploadAnalysisScreen() {
 
                 {/* Actions */}
                 <View style={s.actionRow}>
+                  <TouchableOpacity style={[s.actionBtn, s.actionBtnSecondary]} onPress={() => navigation.navigate('/explainability')}>
+                    <FileText color={theme.foreground} size={18} style={{ marginRight: 8 }} />
+                    <Text style={s.actionBtnSecondaryText}>Explainability</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={[s.actionBtn, s.actionBtnSecondary]} onPress={() => navigation.navigate('/knowledge-graph')}>
+                    <History color={theme.foreground} size={18} style={{ marginRight: 8 }} />
+                    <Text style={s.actionBtnSecondaryText}>Knowledge Graph</Text>
+                  </TouchableOpacity>
+                </View>
+                <View style={s.actionRow}>
                   <TouchableOpacity style={s.actionBtn} onPress={exportPdf}>
                     <Share color={theme.primaryForeground} size={18} style={{ marginRight: 8 }} />
                     <Text style={s.actionBtnText}>Export PDF</Text>
@@ -548,6 +595,16 @@ const styles = (theme: any) => StyleSheet.create({
   title: { color: theme.foreground, fontSize: typography['2xl'], fontWeight: '700', fontFamily: fontFamily.bold },
   subtitle: { color: theme.mutedForeground, fontSize: typography.sm, marginTop: 2, fontFamily: fontFamily.regular },
   scroll: { paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl, gap: spacing.md },
+  patientBanner: {
+    backgroundColor: theme.primaryGlow,
+    borderWidth: 1,
+    borderColor: theme.primary,
+    borderRadius: radius.lg,
+    padding: spacing.md,
+    gap: 2,
+  },
+  patientBannerTitle: { color: theme.foreground, fontSize: typography.base, fontFamily: fontFamily.bold },
+  patientBannerMeta: { color: theme.mutedForeground, fontSize: typography.xs, fontFamily: fontFamily.regular },
   uploadBox: {
     borderWidth: 2,
     borderColor: theme.cardBorder,

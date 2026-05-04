@@ -1,132 +1,151 @@
-// XMedFusion — Dual Theme Color System
-// Light & dark values sourced directly from frontend/src/index.css
-// :root = light, .dark = dark
-
 export type ThemeColors = {
-    background: string;
-    backgroundDeep: string;
-    backgroundCard: string;
-    card: string;
-    cardForeground: string;
-    foreground: string;
-    mutedForeground: string;
-    primary: string;
-    primaryForeground: string;
-    primaryGlow: string;
-    accent: string;
-    accentGlow: string;
-    accentForeground: string;
-    border: string;
-    cardBorder: string;
-    input: string;
-    destructive: string;
-    destructiveBg: string;
-    success: string;
-    successBg: string;
-    warning: string;
-    warningBg: string;
-    transparent: string;
-    white: string;
-    black: string;
+  background: string;
+  backgroundSoft: string;
+  backgroundDeep: string;
+  backgroundElevated: string;
+  foreground: string;
+  mutedForeground: string;
+  card: string;
+  cardForeground: string;
+  border: string;
+  cardBorder: string;
+  input: string;
+  primary: string;
+  primaryForeground: string;
+  primaryGlow: string;
+  accent: string;
+  accentForeground: string;
+  accentGlow: string;
+  secondary: string;
+  secondaryForeground: string;
+  success: string;
+  successBg: string;
+  warning: string;
+  warningBg: string;
+  destructive: string;
+  destructiveBg: string;
+  medicalTeal: string;
+  medicalBlue: string;
+  medicalBlueLight: string;
+  clinicalInk: string;
+  clinicalSteel: string;
+  clinicalVeil: string;
+  white: string;
+  black: string;
+  transparent: string;
+  shadowColor: string;
 };
 
-// ─── DARK THEME (from .dark in index.css) ─────────────────────────────
-export const darkTheme: ThemeColors = {
-    background: 'hsl(210, 40%, 8%)',
-    card: 'hsl(210, 40%, 11%)',
-    backgroundDeep: 'hsl(210, 40%, 6%)',
-    backgroundCard: 'hsl(210, 30%, 18%)',
-    foreground: 'hsl(210, 20%, 98%)',
-    cardForeground: 'hsl(210, 20%, 98%)',
-    mutedForeground: 'hsl(210, 20%, 65%)',
-    primary: 'hsl(187, 85%, 50%)',
-    primaryForeground: 'hsl(210, 40%, 8%)',
-    primaryGlow: 'rgba(14, 184, 212, 0.12)',
-    accent: 'hsl(220, 70%, 60%)',
-    accentGlow: 'rgba(96, 136, 238, 0.15)',
-    accentForeground: 'hsl(0, 0%, 100%)',
-    border: 'hsl(210, 30%, 20%)',
-    cardBorder: 'hsl(210, 30%, 20%)',
-    input: 'hsl(210, 30%, 20%)',
-    destructive: 'hsl(0, 62%, 50%)',
-    destructiveBg: 'rgba(180, 60, 60, 0.15)',
-    success: 'hsl(160, 60%, 45%)',
-    successBg: 'rgba(34, 180, 120, 0.12)',
-    warning: 'hsl(45, 93%, 47%)',
-    warningBg: 'rgba(245, 180, 30, 0.12)',
-    transparent: 'transparent',
-    white: '#FFFFFF',
-    black: '#000000',
-};
-
-// ─── LIGHT THEME (from :root in index.css) ─────────────────────────────
 export const lightTheme: ThemeColors = {
-    background: 'hsl(210, 20%, 98%)',
-    card: 'hsl(0, 0%, 100%)',
-    backgroundDeep: 'hsl(210, 20%, 95%)',
-    backgroundCard: 'hsl(210, 30%, 95%)',
-    foreground: 'hsl(210, 40%, 11%)',
-    cardForeground: 'hsl(210, 40%, 11%)',
-    mutedForeground: 'hsl(210, 20%, 45%)',
-    primary: 'hsl(187, 85%, 43%)',
-    primaryForeground: 'hsl(0, 0%, 100%)',
-    primaryGlow: 'rgba(14, 184, 180, 0.10)',
-    accent: 'hsl(220, 70%, 55%)',
-    accentGlow: 'rgba(96, 136, 230, 0.10)',
-    accentForeground: 'hsl(0, 0%, 100%)',
-    border: 'hsl(210, 20%, 90%)',
-    cardBorder: 'hsl(210, 20%, 88%)',
-    input: 'hsl(210, 20%, 90%)',
-    destructive: 'hsl(0, 84%, 60%)',
-    destructiveBg: 'rgba(220, 50, 50, 0.08)',
-    success: 'hsl(160, 60%, 40%)',
-    successBg: 'rgba(20, 160, 100, 0.10)',
-    warning: 'hsl(45, 93%, 40%)',
-    warningBg: 'rgba(200, 150, 10, 0.10)',
-    transparent: 'transparent',
-    white: '#FFFFFF',
-    black: '#000000',
+  background: 'hsl(0, 0%, 99%)',
+  backgroundSoft: 'hsl(224, 56%, 97%)',
+  backgroundDeep: 'hsl(224, 56%, 96%)',
+  backgroundElevated: 'rgba(255, 255, 255, 0.9)',
+  foreground: 'hsl(225, 12%, 16%)',
+  mutedForeground: 'hsl(226, 8%, 42%)',
+  card: 'hsl(0, 0%, 100%)',
+  cardForeground: 'hsl(225, 12%, 16%)',
+  border: 'hsl(225, 18%, 88%)',
+  cardBorder: 'rgba(219, 225, 240, 0.85)',
+  input: 'hsl(225, 18%, 88%)',
+  primary: 'hsl(225, 67%, 66%)',
+  primaryForeground: 'hsl(0, 0%, 100%)',
+  primaryGlow: 'rgba(123, 145, 233, 0.18)',
+  accent: 'hsl(206, 77%, 44%)',
+  accentForeground: 'hsl(0, 0%, 100%)',
+  accentGlow: 'rgba(26, 128, 199, 0.16)',
+  secondary: 'hsl(224, 56%, 95%)',
+  secondaryForeground: 'hsl(225, 12%, 16%)',
+  success: 'hsl(160, 60%, 45%)',
+  successBg: 'rgba(32, 174, 127, 0.14)',
+  warning: 'hsl(45, 93%, 47%)',
+  warningBg: 'rgba(240, 188, 25, 0.16)',
+  destructive: 'hsl(0, 84%, 60%)',
+  destructiveBg: 'rgba(239, 68, 68, 0.12)',
+  medicalTeal: 'hsl(206, 77%, 44%)',
+  medicalBlue: 'hsl(225, 67%, 66%)',
+  medicalBlueLight: 'hsl(225, 70%, 94%)',
+  clinicalInk: 'hsl(225, 12%, 16%)',
+  clinicalSteel: 'hsl(214, 18%, 67%)',
+  clinicalVeil: 'hsl(203, 22%, 76%)',
+  white: '#FFFFFF',
+  black: '#000000',
+  transparent: 'transparent',
+  shadowColor: 'rgba(30, 41, 59, 0.12)',
 };
 
-// ─── SPACING ────────────────────────────────────────────────────────────
+export const darkTheme: ThemeColors = {
+  background: 'hsl(210, 40%, 8%)',
+  backgroundSoft: 'hsl(210, 38%, 11%)',
+  backgroundDeep: 'hsl(210, 42%, 6%)',
+  backgroundElevated: 'rgba(18, 28, 40, 0.92)',
+  foreground: 'hsl(210, 20%, 98%)',
+  mutedForeground: 'hsl(210, 20%, 65%)',
+  card: 'hsl(210, 40%, 11%)',
+  cardForeground: 'hsl(210, 20%, 98%)',
+  border: 'hsl(210, 30%, 20%)',
+  cardBorder: 'rgba(49, 66, 87, 0.92)',
+  input: 'hsl(210, 30%, 20%)',
+  primary: 'hsl(187, 85%, 50%)',
+  primaryForeground: 'hsl(210, 40%, 8%)',
+  primaryGlow: 'rgba(14, 184, 212, 0.16)',
+  accent: 'hsl(220, 70%, 60%)',
+  accentForeground: 'hsl(0, 0%, 100%)',
+  accentGlow: 'rgba(96, 136, 238, 0.18)',
+  secondary: 'hsl(210, 30%, 18%)',
+  secondaryForeground: 'hsl(210, 20%, 98%)',
+  success: 'hsl(160, 60%, 45%)',
+  successBg: 'rgba(34, 180, 120, 0.14)',
+  warning: 'hsl(45, 93%, 47%)',
+  warningBg: 'rgba(245, 180, 30, 0.16)',
+  destructive: 'hsl(0, 62%, 50%)',
+  destructiveBg: 'rgba(180, 60, 60, 0.16)',
+  medicalTeal: 'hsl(187, 85%, 50%)',
+  medicalBlue: 'hsl(220, 70%, 60%)',
+  medicalBlueLight: 'rgba(96, 136, 238, 0.18)',
+  clinicalInk: 'hsl(210, 20%, 98%)',
+  clinicalSteel: 'hsl(210, 20%, 65%)',
+  clinicalVeil: 'hsl(210, 30%, 20%)',
+  white: '#FFFFFF',
+  black: '#000000',
+  transparent: 'transparent',
+  shadowColor: 'rgba(2, 8, 23, 0.45)',
+};
+
 export const spacing = {
-    xs: 4,
-    sm: 8,
-    md: 16,
-    lg: 24,
-    xl: 32,
-    xxl: 48,
+  xs: 4,
+  sm: 8,
+  md: 16,
+  lg: 24,
+  xl: 32,
+  xxl: 48,
 };
 
-// ─── BORDER RADIUS ──────────────────────────────────────────────────────
 export const radius = {
-    sm: 8,
-    md: 10,
-    lg: 12,
-    xl: 20,
-    xxl: 28,
-    full: 9999,
+  sm: 10,
+  md: 16,
+  lg: 24,
+  xl: 28,
+  xxl: 34,
+  full: 9999,
 };
 
-// ─── TYPOGRAPHY ─────────────────────────────────────────────────────────
 export const typography = {
-    xs: 11,
-    sm: 13,
-    base: 15,
-    lg: 17,
-    xl: 20,
-    '2xl': 24,
-    '3xl': 30,
+  xs: 11,
+  sm: 13,
+  base: 15,
+  lg: 18,
+  xl: 22,
+  '2xl': 28,
+  '3xl': 36,
 };
 
-// ─── FONT FAMILIES ──────────────────────────────────────────────────────
 export const fontFamily = {
-    regular: 'PlusJakartaSans_400Regular',
-    medium: 'PlusJakartaSans_500Medium',
-    semiBold: 'PlusJakartaSans_600SemiBold',
-    bold: 'PlusJakartaSans_700Bold',
-    extraBold: 'PlusJakartaSans_800ExtraBold',
+  regular: 'PlusJakartaSans_400Regular',
+  medium: 'PlusJakartaSans_500Medium',
+  semiBold: 'PlusJakartaSans_600SemiBold',
+  bold: 'PlusJakartaSans_700Bold',
+  extraBold: 'PlusJakartaSans_800ExtraBold',
 };
 
-// Legacy default export for backward compat (dark)
-export const colors = darkTheme;
+export const colors = lightTheme;

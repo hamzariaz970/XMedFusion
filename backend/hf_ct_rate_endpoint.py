@@ -1,3 +1,4 @@
+<<<<<<< Updated upstream
 """
 Run CT-RATE studies through a Hugging Face Inference Endpoint.
 
@@ -37,10 +38,22 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Sequence
+=======
+from __future__ import annotations
+
+import base64
+import io
+import json
+import os
+import re
+from pathlib import Path
+from typing import Any
+>>>>>>> Stashed changes
 
 import requests
 from PIL import Image
 
+<<<<<<< Updated upstream
 try:
     # backend/config.py loads .env via dotenv, so this picks up endpoint settings too.
     import config as _backend_config
@@ -367,10 +380,151 @@ def build_inference_api_payload(
         "parameters": {
             "max_new_tokens": max_tokens,
             "temperature": temperature,
+=======
+import config
+
+
+HF_ENDPOINT_URL = os.getenv("HF_ENDPOINT_URL", "").strip()
+HF_CT_ENDPOINT_URL = os.getenv("HF_CT_ENDPOINT_URL", "").strip()
+HF_CT_ENDPOINT_MODEL = os.getenv("HF_CT_ENDPOINT_MODEL", "google/medgemma-4b-it").strip()
+HF_CT_ENDPOINT_TIMEOUT_SECONDS = int(os.getenv("HF_CT_ENDPOINT_TIMEOUT_SECONDS", "240"))
+HF_CT_ENDPOINT_MAX_IMAGES = int(os.getenv("HF_CT_ENDPOINT_MAX_IMAGES", "16"))
+HF_CT_ENDPOINT_IMAGE_MAX_DIM = int(os.getenv("HF_CT_ENDPOINT_IMAGE_MAX_DIM", "256"))
+HF_CT_ENDPOINT_JPEG_QUALITY = int(os.getenv("HF_CT_ENDPOINT_JPEG_QUALITY", "80"))
+HF_ROUTER_URL = os.getenv("HF_ROUTER_URL", "https://router.huggingface.co/v1/chat/completions").strip()
+
+
+def _resolve_endpoint_url() -> str:
+    # Prefer the exact dedicated endpoint configured in backend/.env.
+    if HF_ENDPOINT_URL:
+        return HF_ENDPOINT_URL
+    if HF_CT_ENDPOINT_URL:
+        return HF_CT_ENDPOINT_URL
+    return HF_ROUTER_URL
+
+
+def _select_evenly(items: list[str], limit: int) -> list[str]:
+    if len(items) <= limit:
+        return items
+    if limit <= 1:
+        return [items[len(items) // 2]]
+    last_idx = len(items) - 1
+    selected_indexes = sorted({round(i * last_idx / (limit - 1)) for i in range(limit)})
+    return [items[idx] for idx in selected_indexes]
+
+
+def _image_to_data_url(path: str) -> str:
+    with Image.open(path) as image:
+        image = image.convert("RGB")
+        image.thumbnail((HF_CT_ENDPOINT_IMAGE_MAX_DIM, HF_CT_ENDPOINT_IMAGE_MAX_DIM))
+        buffer = io.BytesIO()
+        image.save(
+            buffer,
+            format="JPEG",
+            quality=HF_CT_ENDPOINT_JPEG_QUALITY,
+            optimize=True,
+        )
+    encoded = base64.b64encode(buffer.getvalue()).decode("utf-8")
+    return f"data:image/jpeg;base64,{encoded}"
+
+
+def _build_prompt(slice_count: int) -> str:
+    return (
+        "You are an expert thoracic radiologist analyzing a CT-RATE style chest CT study. "
+        f"The study is represented by {slice_count} axial slice images in cranio-caudal order. "
+        "Write the report in exactly this format:\n\n"
+        "FINDINGS:\n"
+        "Use complete radiology sentences. Describe lungs, pleura, heart, mediastinum, visible upper abdomen, and bones when relevant. "
+        "Mention slice numbers in brackets only when helpful, for example [Slice 5].\n\n"
+        "IMPRESSION:\n"
+        "Provide a concise numbered or sentence-style diagnostic impression.\n\n"
+        "Do not include markdown fences, JSON, explanations, recommendations, or any text outside FINDINGS and IMPRESSION."
+    )
+
+
+def _endpoint_inputs_prompt(prompt: str, image_urls: list[str]) -> str:
+    image_blocks = "\n\n".join(f"![]({url})" for url in image_urls)
+    return f"{image_blocks}\n\n{prompt}".strip()
+
+
+def _extract_text(payload: Any) -> str:
+    if isinstance(payload, str):
+        return payload
+    if isinstance(payload, list):
+        return "\n".join(_extract_text(item) for item in payload if item)
+    if not isinstance(payload, dict):
+        return str(payload or "")
+
+    for key in ("generated_text", "text", "output_text", "report"):
+        value = payload.get(key)
+        if value:
+            return _extract_text(value)
+
+    choices = payload.get("choices")
+    if isinstance(choices, list) and choices:
+        message = choices[0].get("message", {}) if isinstance(choices[0], dict) else {}
+        content = message.get("content")
+        if isinstance(content, list):
+            return "\n".join(
+                part.get("text", "") for part in content if isinstance(part, dict)
+            )
+        if content:
+            return str(content)
+
+    return json.dumps(payload)
+
+
+def normalize_ct_rate_report(text: str) -> str:
+    clean = re.sub(r"<think>.*?</think>", "", text or "", flags=re.DOTALL).strip()
+    clean = re.sub(r"^```(?:json)?\s*", "", clean, flags=re.IGNORECASE).strip()
+    clean = re.sub(r"\s*```$", "", clean).strip()
+
+    findings_match = re.search(
+        r"FINDINGS?:\s*(.*?)(?=\n?\s*(?:IMPRESSION|IMPRESSIONS):|\Z)",
+        clean,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    impression_match = re.search(
+        r"IMPRESSIONS?:\s*(.*?)(?=\n?\s*(?:RECOMMENDATIONS?|LABELS?):|\Z)",
+        clean,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+
+    findings = findings_match.group(1).strip() if findings_match else clean.strip()
+    impression = impression_match.group(1).strip() if impression_match else ""
+
+    if not impression:
+        impression = "No separate impression was provided by the CT endpoint."
+
+    findings = findings or "No acute cardiopulmonary abnormality is identified on the provided CT slices."
+    return f"FINDINGS:\n{findings}\n\nIMPRESSION:\n{impression}".strip()
+
+
+def _router_payload(prompt: str, image_urls: list[str]) -> dict[str, Any]:
+    content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
+    content.extend({"type": "image_url", "image_url": {"url": url}} for url in image_urls)
+    return {
+        "model": HF_CT_ENDPOINT_MODEL,
+        "messages": [{"role": "user", "content": content}],
+        "max_tokens": 600,
+        "temperature": 0.1,
+    }
+
+
+def _custom_endpoint_payload(prompt: str, image_urls: list[str]) -> dict[str, Any]:
+    return {
+        "inputs": _endpoint_inputs_prompt(prompt, image_urls),
+        "parameters": {
+            "max_new_tokens": 600,
+            "temperature": 0.1,
+            "do_sample": False,
+            "return_full_text": False,
+>>>>>>> Stashed changes
         },
     }
 
 
+<<<<<<< Updated upstream
 def build_chat_payload(
     *,
     content: Sequence[dict[str, Any]],
@@ -682,3 +836,46 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+=======
+def generate_ct_rate_report_from_endpoint(image_paths: list[str]) -> dict[str, Any]:
+    if not image_paths:
+        raise ValueError("No CT slices were provided.")
+
+    token = os.getenv("HF_CT_ENDPOINT_API_KEY") or os.getenv("HF_TOKEN") or config.HF_TOKEN
+    if not token:
+        raise RuntimeError("HF_TOKEN or HF_CT_ENDPOINT_API_KEY is required for the CT endpoint path.")
+
+    selected_paths = _select_evenly(image_paths, HF_CT_ENDPOINT_MAX_IMAGES)
+    image_urls = [_image_to_data_url(path) for path in selected_paths]
+    prompt = _build_prompt(len(selected_paths))
+    endpoint_url = _resolve_endpoint_url()
+    payload = (
+        _custom_endpoint_payload(prompt, image_urls)
+        if endpoint_url != HF_ROUTER_URL
+        else _router_payload(prompt, image_urls)
+    )
+
+    response = requests.post(
+        endpoint_url,
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        },
+        json=payload,
+        timeout=HF_CT_ENDPOINT_TIMEOUT_SECONDS,
+    )
+    response.raise_for_status()
+
+    raw_payload = response.json()
+    raw_report = _extract_text(raw_payload)
+    final_report = normalize_ct_rate_report(raw_report)
+
+    return {
+        "final_report": final_report,
+        "raw_report": raw_report,
+        "endpoint_url": endpoint_url,
+        "model": HF_CT_ENDPOINT_MODEL,
+        "selected_slice_count": len(selected_paths),
+        "input_slice_count": len(image_paths),
+    }
+>>>>>>> Stashed changes

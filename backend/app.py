@@ -10,6 +10,7 @@ import uuid
 import os
 import json
 import base64
+import sys
 import uvicorn
 from typing import List
 import config
@@ -18,6 +19,11 @@ import time
 import requests
 import threading
 from functools import lru_cache
+
+for _stream_name in ("stdout", "stderr"):
+    _stream = getattr(sys, _stream_name, None)
+    if _stream and hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
 
 # --- GLOBAL AGENT STORE ---
 agents = {}
@@ -28,6 +34,7 @@ _ai_warmup_complete = False
 _ai_warmup_error = None
 _optional_model_status = {}
 PRELOAD_ALL_MODELS_ON_STARTUP = os.getenv("PRELOAD_ALL_MODELS_ON_STARTUP", "0").strip().lower() not in {"0", "false", "no", "off"}
+_resolved_ollama_model = None
 
 
 def _load_ai_runtime():
@@ -43,6 +50,8 @@ def _load_ai_runtime():
     with _ai_runtime_lock:
         if _ai_runtime is not None:
             return _ai_runtime
+
+        _resolve_ollama_model_name()
 
         from synthesis import (
             LocalSynthesisAgent,
@@ -119,9 +128,7 @@ def _warm_ai_stack():
 def _get_explain_llm():
     from langchain_community.chat_models import ChatOllama
 
-    model_name = config.OLLAMA_MODEL
-    if model_name.startswith("ollama/"):
-        model_name = model_name.split("/", 1)[1]
+    model_name = _resolve_ollama_model_name()
 
     return ChatOllama(
         model=model_name,
@@ -160,8 +167,41 @@ def _normalized_ollama_model_name():
         model_name = model_name.split("/", 1)[1]
     return model_name
 
+
+def _resolve_ollama_model_name():
+    global _resolved_ollama_model
+    if _resolved_ollama_model:
+        return _resolved_ollama_model
+
+    preferred_model = _normalized_ollama_model_name()
+    fallback_model = os.getenv("OLLAMA_FALLBACK_MODEL", "").strip()
+
+    try:
+        response = requests.get(f"{config.BASE_URL}/api/tags", timeout=2)
+        response.raise_for_status()
+        models = response.json().get("models", [])
+        model_names = [m.get("name") for m in models if m.get("name")]
+
+        if preferred_model in model_names:
+          chosen_model = preferred_model
+        elif fallback_model and fallback_model in model_names:
+          chosen_model = fallback_model
+          print(f"[Ollama] Preferred model '{preferred_model}' not found. Falling back to '{chosen_model}'.")
+        elif model_names:
+          chosen_model = model_names[0]
+          print(f"[Ollama] Preferred model '{preferred_model}' not found. Falling back to '{chosen_model}'.")
+        else:
+          chosen_model = preferred_model
+
+        _resolved_ollama_model = chosen_model
+        config.OLLAMA_MODEL = chosen_model
+        return chosen_model
+    except Exception:
+        _resolved_ollama_model = preferred_model
+        return preferred_model
+
 def _get_ollama_status():
-    model_name = _normalized_ollama_model_name()
+    model_name = _resolve_ollama_model_name()
     try:
         response = requests.get(f"{config.BASE_URL}/api/tags", timeout=2)
         response.raise_for_status()
@@ -237,7 +277,9 @@ async def synthesize_report(
     # 1. Save all uploaded files to disk
     for file in files:
         file_id = str(uuid.uuid4())
-        image_path = os.path.join(UPLOAD_DIR, f"{file_id}.png")
+        original_ext = os.path.splitext(file.filename or "")[1].lower()
+        safe_ext = original_ext if original_ext in {".png", ".jpg", ".jpeg", ".webp", ".bmp"} else ".png"
+        image_path = os.path.join(UPLOAD_DIR, f"{file_id}{safe_ext}")
 
         with open(image_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)

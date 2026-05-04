@@ -1,7 +1,4 @@
-import axios from 'axios';
-
-// Replace with your machine's local IP address, or your active ngrok URL
-export const BASE_URL = 'https://prevalent-kamron-whirlingly.ngrok-free.dev';
+import { getApiBase } from '../lib/apiConfig';
 
 export type StreamChunk = {
     status: string;
@@ -14,27 +11,27 @@ export type StreamChunk = {
     error?: string;
 };
 
-export const uploadXRay = async (
+const streamUpload = (
+    baseUrl: string,
     imageUri: string,
+    scanType: 'xray' | 'ct' | 'auto',
     onChunk: (chunk: StreamChunk) => void
-) => {
+) => new Promise<{ ok: boolean; status?: number; networkError?: boolean }>((resolve) => {
     const formData = new FormData();
-
-    // Create a file object from the URI
     const filename = imageUri.split('/').pop() || 'upload.png';
     const match = /\.(\w+)$/.exec(filename);
-    const type = match ? `image/${match[1]}` : `image`;
+    const extension = match?.[1]?.toLowerCase();
+    const type = extension === 'jpg' ? 'image/jpeg' : extension ? `image/${extension}` : 'image';
 
     formData.append('files', {
         uri: imageUri,
         name: filename,
         type,
     } as any);
+    formData.append('scan_type', scanType);
 
-    // React Native's fetch polyfill doesn't support streaming readable bodies (.getReader()).
-    // We must use XMLHttpRequest to read chunks as they arrive.
     const xhr = new XMLHttpRequest();
-    xhr.open('POST', `${BASE_URL}/api/synthesize-report`);
+    xhr.open('POST', `${baseUrl}/api/synthesize-report`);
     xhr.setRequestHeader('Accept', 'application/x-ndjson');
     xhr.setRequestHeader('ngrok-skip-browser-warning', 'true');
 
@@ -45,43 +42,72 @@ export const uploadXRay = async (
         const newText = text.substring(processedIdx);
         const lines = newText.split('\n');
 
-        // If the last line is incomplete (doesn't end with \n), we leave it for the next progress event
-        // by only processing up to lines.length - 1
         for (let i = 0; i < lines.length - 1; i++) {
             const line = lines[i];
             if (line.trim()) {
                 try {
                     const data = JSON.parse(line) as StreamChunk;
                     onChunk(data);
-                } catch (e) {
+                } catch {
                     console.warn('Failed to parse NDJSON chunk:', line);
                 }
             }
-            // Update processed index strictly by the exact length of what we processed + the newline character
             processedIdx += line.length + 1;
         }
     };
 
     xhr.onload = () => {
         if (xhr.status >= 200 && xhr.status < 300) {
-            // Process any remaining data that didn't end in a newline
             const remainingText = xhr.responseText.substring(processedIdx);
             if (remainingText.trim()) {
                 try {
                     const data = JSON.parse(remainingText) as StreamChunk;
                     onChunk(data);
-                } catch (e) {
-                    // Sometimes the final empty string fails parsing, which is fine
+                } catch {
+                    // Ignore incomplete final chunks.
                 }
             }
+            resolve({ ok: true, status: xhr.status });
         } else {
-            onChunk({ status: 'error', message: `Server responded with ${xhr.status}` });
+            resolve({ ok: false, status: xhr.status });
         }
     };
 
     xhr.onerror = () => {
-        onChunk({ status: 'error', message: 'Network request failed' });
+        resolve({ ok: false, networkError: true });
     };
 
     xhr.send(formData);
+});
+
+export const uploadXRay = async (
+    imageUri: string,
+    scanType: 'xray' | 'ct' | 'auto' = 'xray',
+    onChunk: (chunk: StreamChunk) => void
+) => {
+    const firstBaseUrl = await getApiBase();
+    const firstAttempt = await streamUpload(firstBaseUrl, imageUri, scanType, onChunk);
+
+    if (firstAttempt.ok) {
+        return;
+    }
+
+    const retryBaseUrl = await getApiBase(true);
+    if (retryBaseUrl !== firstBaseUrl) {
+        const retryAttempt = await streamUpload(retryBaseUrl, imageUri, scanType, onChunk);
+        if (retryAttempt.ok) {
+            return;
+        }
+
+        onChunk({
+            status: 'error',
+            message: retryAttempt.networkError ? `Network request failed while reaching ${retryBaseUrl}` : `Server responded with ${retryAttempt.status} from ${retryBaseUrl}`,
+        });
+        return;
+    }
+
+    onChunk({
+        status: 'error',
+        message: firstAttempt.networkError ? `Network request failed while reaching ${firstBaseUrl}` : `Server responded with ${firstAttempt.status} from ${firstBaseUrl}`,
+    });
 };

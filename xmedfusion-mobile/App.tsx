@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { View, ActivityIndicator } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
@@ -13,27 +12,29 @@ import {
   PlusJakartaSans_800ExtraBold,
 } from '@expo-google-fonts/plus-jakarta-sans';
 
-// Theme
 import { ThemeProvider, useTheme } from './src/theme/ThemeContext';
 import { darkTheme } from './src/theme/colors';
+import { AuthProvider, useAuth } from './src/theme/AuthContext';
+import { PatientProvider } from './src/context/PatientContext';
+import { AnalysisProvider } from './src/context/AnalysisContext';
 
-// Screens
-import SplashScreen from './src/screens/SplashScreen';
+import IndexScreen from './src/screens/IndexScreen';
 import LoginScreen from './src/screens/LoginScreen';
+import PendingApprovalScreen from './src/screens/PendingApprovalScreen';
+import AdminDashboardScreen from './src/screens/AdminDashboardScreen';
+import DashboardScreen from './src/screens/DashboardScreen';
+import PatientsScreen from './src/screens/PatientsScreen';
 import UploadAnalysisScreen from './src/screens/UploadAnalysisScreen';
-import MainTabNavigator from './src/navigation/MainTabNavigator';
-import ReportDetailScreen from './src/screens/ReportDetailScreen';
-import PatientDetailScreen from './src/screens/PatientDetailScreen';
-import ProfileScreen from './src/screens/ProfileScreen';
-import SecurityScreen from './src/screens/SecurityScreen';
+import ExplainabilityScreen from './src/screens/ExplainabilityScreen';
+import KnowledgeGraphScreen from './src/screens/KnowledgeGraphScreen';
+import HILLabelingScreen from './src/screens/HILLabelingScreen';
+import NotFoundScreen from './src/screens/NotFoundScreen';
 
 const Stack = createNativeStackNavigator();
 
-import { useAuth } from './src/theme/AuthContext';
-
 function AppNavigator() {
   const { theme, isDark } = useTheme();
-  const { session, loading } = useAuth();
+  const { session, loading, roleLoading, isAdmin, isApproved, isPending, isRejected } = useAuth();
 
   const navTheme = {
     ...DefaultTheme,
@@ -46,7 +47,7 @@ function AppNavigator() {
     },
   };
 
-  if (loading) {
+  if (loading || roleLoading) {
     return (
       <View style={{ flex: 1, backgroundColor: theme.backgroundDeep, justifyContent: 'center', alignItems: 'center' }}>
         <ActivityIndicator color={theme.primary} size="large" />
@@ -54,30 +55,36 @@ function AppNavigator() {
     );
   }
 
+  const initialRoute = !session
+    ? '/'
+    : isRejected || isPending || !isApproved
+      ? '/pending'
+      : isAdmin
+        ? '/admin'
+        : '/dashboard';
+
   return (
     <NavigationContainer theme={navTheme}>
       <StatusBar style={isDark ? 'light' : 'dark'} />
-      <Stack.Navigator screenOptions={{ headerShown: false }}>
-        {session ? (
-          <>
-            <Stack.Screen name="MainTabs" component={MainTabNavigator} />
-            <Stack.Screen name="Upload" component={UploadAnalysisScreen} />
-            <Stack.Screen name="ReportDetail" component={ReportDetailScreen} />
-            <Stack.Screen name="PatientDetail" component={PatientDetailScreen} />
-            <Stack.Screen name="Profile" component={ProfileScreen} />
-            <Stack.Screen name="Security" component={SecurityScreen} />
-          </>
-        ) : (
-          <>
-            <Stack.Screen name="Login" component={LoginScreen} />
-          </>
-        )}
+      <Stack.Navigator
+        screenOptions={{ headerShown: false }}
+        initialRouteName={initialRoute}
+      >
+        <Stack.Screen name="/" component={IndexScreen} />
+        <Stack.Screen name="/login" component={LoginScreen} />
+        <Stack.Screen name="/pending" component={PendingApprovalScreen} />
+        <Stack.Screen name="/knowledge-graph" component={KnowledgeGraphScreen} />
+        <Stack.Screen name="/admin" component={AdminDashboardScreen} />
+        <Stack.Screen name="/dashboard" component={DashboardScreen} />
+        <Stack.Screen name="/patients" component={PatientsScreen} />
+        <Stack.Screen name="/upload" component={UploadAnalysisScreen} />
+        <Stack.Screen name="/explainability" component={ExplainabilityScreen} />
+        <Stack.Screen name="/hil/task/:taskId" component={HILLabelingScreen} />
+        <Stack.Screen name="*" component={NotFoundScreen} />
       </Stack.Navigator>
     </NavigationContainer>
   );
 }
-
-import { AuthProvider } from './src/theme/AuthContext';
 
 export default function App() {
   const [fontsLoaded] = useFonts({
@@ -99,7 +106,11 @@ export default function App() {
   return (
     <ThemeProvider>
       <AuthProvider>
-        <AppNavigator />
+        <PatientProvider>
+          <AnalysisProvider>
+            <AppNavigator />
+          </AnalysisProvider>
+        </PatientProvider>
       </AuthProvider>
     </ThemeProvider>
   );
