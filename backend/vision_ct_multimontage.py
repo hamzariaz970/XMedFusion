@@ -881,8 +881,6 @@ def main() -> None:
         target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
         exclude_modules=["vision_tower", "multi_modal_projector"],
         task_type="CAUSAL_LM",
-        modules_to_save=["lm_head"],
-        ensure_weight_tying=True,
     )
 
     collate_fn = make_multimontage_collator(
@@ -903,7 +901,7 @@ def main() -> None:
         gradient_accumulation_steps=args.grad_accum,
         gradient_checkpointing=True,
         gradient_checkpointing_kwargs={"use_reentrant": False},
-        optim="paged_adamw_8bit",
+        optim="adamw_torch",
         logging_steps=5,
         eval_strategy="no",
         save_strategy="epoch",
