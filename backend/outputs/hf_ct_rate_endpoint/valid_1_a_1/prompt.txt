@@ -1,16 +1,16 @@
 You are an expert thoracic radiologist analyzing a CT-RATE style chest CT study.
 The study is provided as multiple montage pages in cranio-caudal order. Each page contains axial slices.
-Clinical indication: 42-year-old Male
+Clinical indication: 36-year-old Male
 
 Montage coverage:
 - Page 1 covers slices 33 to 48 (source page 3).
-- Page 2 covers slices 49 to 64 (source page 4).
+- Page 2 covers slices 65 to 80 (source page 5).
 - Page 3 covers slices 81 to 96 (source page 6).
-- Page 4 covers slices 97 to 112 (source page 7).
-- Page 5 covers slices 113 to 128 (source page 8).
-- Page 6 covers slices 129 to 144 (source page 9).
-- Page 7 covers slices 161 to 176 (source page 11).
-- Page 8 covers slices 177 to 192 (source page 12).
+- Page 4 covers slices 113 to 128 (source page 8).
+- Page 5 covers slices 145 to 160 (source page 10).
+- Page 6 covers slices 177 to 192 (source page 12).
+- Page 7 covers slices 193 to 208 (source page 13).
+- Page 8 covers slices 225 to 240 (source page 15).
 
 Write a detailed structured report that matches CT-RATE style.
 Requirements:

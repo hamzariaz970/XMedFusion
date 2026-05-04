@@ -54,7 +54,9 @@ DEFAULT_PAGE_SIZE = (768, 768)
 DEFAULT_MAX_MONTAGES = 8
 DEFAULT_TIMEOUT = 300
 DEFAULT_MAX_TOKENS = 900
-DEFAULT_TEMPERATURE = 0.2
+DEFAULT_TEMPERATURE = 0.1
+DEFAULT_SELECTION_START_FRACTION = 0.15
+DEFAULT_SELECTION_END_FRACTION = 0.90
 
 
 @dataclass(frozen=True)
@@ -174,13 +176,30 @@ def sorted_slice_paths(volume_dir: str | os.PathLike[str]) -> list[Path]:
     return slice_paths
 
 
-def page_selection_indices(total_pages: int, max_pages: int) -> list[int]:
+def page_selection_indices(
+    total_pages: int,
+    max_pages: int,
+    *,
+    start_fraction: float = DEFAULT_SELECTION_START_FRACTION,
+    end_fraction: float = DEFAULT_SELECTION_END_FRACTION,
+) -> list[int]:
     if total_pages <= max_pages:
         return list(range(total_pages))
     if max_pages <= 1:
         return [total_pages // 2]
 
-    positions = [round(i * (total_pages - 1) / (max_pages - 1)) for i in range(max_pages)]
+    start_page = max(0, min(total_pages - 1, round((total_pages - 1) * start_fraction)))
+    end_page = max(start_page, min(total_pages - 1, round((total_pages - 1) * end_fraction)))
+    useful_span = end_page - start_page + 1
+
+    if useful_span < max_pages:
+        start_page = 0
+        end_page = total_pages - 1
+
+    positions = [
+        round(start_page + i * (end_page - start_page) / (max_pages - 1))
+        for i in range(max_pages)
+    ]
     return sorted(dict.fromkeys(positions))
 
 
@@ -282,7 +301,10 @@ def build_volume_montage_pages(
 
 def build_ct_rate_style_prompt(*, patient_demo: str, page_metadata: Sequence[dict[str, Any]]) -> str:
     page_lines = [
-        f"- Page {page['page_index']} covers slices {page['slice_start']} to {page['slice_end']}."
+        (
+            f"- Page {page['page_index']} covers slices {page['slice_start']} to {page['slice_end']} "
+            f"(source page {page['source_page_index']})."
+        )
         for page in page_metadata
     ]
     pages_text = "\n".join(page_lines)
@@ -297,8 +319,12 @@ def build_ct_rate_style_prompt(*, patient_demo: str, page_metadata: Sequence[dic
         "1. Include a comprehensive FINDINGS section with complete sentences.\n"
         "2. Include a concise IMPRESSION section summarizing the main conclusions.\n"
         "3. Mention mediastinum, lungs, pleura, heart, visible upper abdomen, and bones when relevant.\n"
-        "4. If a finding is best supported by a specific page or slice span, mention it in prose.\n"
-        "5. Do not truncate the report. Finish all sentences.\n\n"
+        "4. Prioritize high-confidence visible findings; if subtle abnormality is uncertain, describe it as possible rather than definite.\n"
+        "5. Do not invent lesion counts, measurements, or laterality unless clearly visible on the provided pages.\n"
+        "6. Prioritize the visible thorax; do not over-weight the first or last slices if coverage is partial.\n"
+        "7. If a finding is best supported by a specific page or slice span, mention it in prose.\n"
+        "8. Do not repeat the prompt, page list, or placeholder text. Output only the report body.\n"
+        "9. Do not truncate the report. Finish all sentences.\n\n"
         "Output exactly:\n"
         "FINDINGS:\n"
         "<detailed findings>\n\n"
@@ -320,6 +346,29 @@ def build_user_content(montage_pages: Sequence[Image.Image], *, prompt_text: str
     for page in montage_pages:
         content.append({"type": "image_url", "image_url": {"url": image_to_data_url(page)}})
     return content
+
+
+def build_inference_api_payload(
+    *,
+    prompt_text: str,
+    montage_pages: Sequence[Image.Image],
+    max_tokens: int = DEFAULT_MAX_TOKENS,
+    temperature: float = DEFAULT_TEMPERATURE,
+) -> dict[str, Any]:
+    image_count = len(montage_pages)
+    image_prefix = " ".join(["<start_of_image>"] * image_count).strip()
+    text = f"{image_prefix}\n{prompt_text}" if image_prefix else prompt_text
+    images = [image_to_data_url(page) for page in montage_pages]
+    return {
+        "inputs": {
+            "text": text,
+            "images": images,
+        },
+        "parameters": {
+            "max_new_tokens": max_tokens,
+            "temperature": temperature,
+        },
+    }
 
 
 def build_chat_payload(
@@ -352,6 +401,34 @@ def extract_report_text(response_json: dict[str, Any]) -> str:
     return str(content).strip()
 
 
+def extract_inference_api_text(response_json: Any) -> str:
+    if isinstance(response_json, list) and response_json:
+        first = response_json[0]
+        if isinstance(first, dict) and "generated_text" in first:
+            return str(first["generated_text"]).strip()
+    if isinstance(response_json, dict) and "generated_text" in response_json:
+        return str(response_json["generated_text"]).strip()
+    raise ValueError(f"Unexpected inference API response shape: {json.dumps(response_json)[:500]}")
+
+
+def clean_generated_report(raw_text: str, *, prompt_text: str) -> str:
+    text = raw_text.strip()
+    if text.startswith(prompt_text):
+        text = text[len(prompt_text) :].lstrip()
+    marker = "FINDINGS:"
+    marker_positions = []
+    start = 0
+    while True:
+        index = text.find(marker, start)
+        if index == -1:
+            break
+        marker_positions.append(index)
+        start = index + len(marker)
+    if marker_positions:
+        text = text[marker_positions[-1] :]
+    return text.strip()
+
+
 def call_chat_completion(
     *,
     endpoint_url: str,
@@ -360,6 +437,35 @@ def call_chat_completion(
     timeout_seconds: int = DEFAULT_TIMEOUT,
 ) -> dict[str, Any]:
     url = f"{normalize_endpoint_url(endpoint_url)}/chat/completions"
+    response = requests.post(
+        url,
+        headers={
+            "Authorization": f"Bearer {hf_token}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        },
+        json=payload,
+        timeout=timeout_seconds,
+    )
+
+    if response.ok:
+        return response.json()
+
+    error_body = response.text[:1000]
+    raise requests.HTTPError(
+        f"Endpoint request failed with {response.status_code}: {error_body}",
+        response=response,
+    )
+
+
+def call_inference_api(
+    *,
+    endpoint_url: str,
+    hf_token: str,
+    payload: dict[str, Any],
+    timeout_seconds: int = DEFAULT_TIMEOUT,
+) -> Any:
+    url = endpoint_url.rstrip("/")
     response = requests.post(
         url,
         headers={
@@ -406,9 +512,15 @@ def run_single_study(
         page_metadata=montage_metadata["pages"],
     )
     content = build_user_content(montage_pages, prompt_text=prompt_text)
-    payload = build_chat_payload(
+    chat_payload = build_chat_payload(
         content=content,
         model=endpoint_name,
+        max_tokens=max_tokens,
+        temperature=temperature,
+    )
+    inference_payload = build_inference_api_payload(
+        prompt_text=prompt_text,
+        montage_pages=montage_pages,
         max_tokens=max_tokens,
         temperature=temperature,
     )
@@ -421,13 +533,14 @@ def run_single_study(
             page.save(study_output_dir / f"montage_page_{index:02d}.jpg", quality=90)
 
     payload_preview = {
-        "message_count": len(payload["messages"]),
+        "message_count": len(chat_payload["messages"]),
         "content_item_count": len(content),
-        "has_model_field": "model" in payload,
+        "has_model_field": "model" in chat_payload,
         "page_count": len(montage_pages),
         "max_tokens": max_tokens,
         "temperature": temperature,
         "study_id": study.study_id,
+        "inference_image_count": len(inference_payload["inputs"]["images"]),
     }
     (study_output_dir / "payload_preview.json").write_text(json.dumps(payload_preview, indent=2), encoding="utf-8")
     (study_output_dir / "prompt.txt").write_text(prompt_text, encoding="utf-8")
@@ -452,12 +565,32 @@ def run_single_study(
         raise ValueError("HF_TOKEN is required for real endpoint calls.")
 
     try:
-        response_json = call_chat_completion(
-            endpoint_url=endpoint_url,
-            hf_token=hf_token,
-            payload=payload,
-            timeout_seconds=timeout_seconds,
-        )
+        try:
+            response_json = call_chat_completion(
+                endpoint_url=endpoint_url,
+                hf_token=hf_token,
+                payload=chat_payload,
+                timeout_seconds=timeout_seconds,
+            )
+            report_text = clean_generated_report(
+                extract_report_text(response_json),
+                prompt_text=prompt_text,
+            )
+        except requests.HTTPError as exc:
+            response = exc.response
+            should_fallback = response is not None and response.status_code in {400, 404}
+            if not should_fallback:
+                raise
+            response_json = call_inference_api(
+                endpoint_url=endpoint_url,
+                hf_token=hf_token,
+                payload=inference_payload,
+                timeout_seconds=timeout_seconds,
+            )
+            report_text = clean_generated_report(
+                extract_inference_api_text(response_json),
+                prompt_text=prompt_text,
+            )
     except requests.HTTPError as exc:
         response = exc.response
         message = str(exc)
@@ -468,7 +601,6 @@ def run_single_study(
             )
         raise RuntimeError(message) from exc
 
-    report_text = extract_report_text(response_json)
     (study_output_dir / "response.json").write_text(json.dumps(response_json, indent=2), encoding="utf-8")
     (study_output_dir / "generated_report.txt").write_text(report_text + "\n", encoding="utf-8")
 

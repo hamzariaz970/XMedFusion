@@ -1,9 +1,9 @@
 [
   {
-    "study_id": "valid_1000_a_1",
-    "page_count": 2,
-    "output_dir": "D:\\FYP\\XMedFusion\\backend\\outputs\\hf_ct_rate_endpoint\\valid_1000_a_1",
-    "report": "DRY RUN: endpoint not called.",
-    "dry_run": true
+    "study_id": "valid_1_a_1",
+    "page_count": 8,
+    "output_dir": "D:\\FYP\\XMedFusion\\backend\\outputs\\hf_ct_rate_endpoint\\valid_1_a_1",
+    "report": "FINDINGS:\nThe study is technically adequate. The heart size is normal. The mediastinal and hilar contours are normal. The lungs are clear. There is no pleural effusion or pneumothorax. The visualized upper abdomen is normal. The visualized bones are normal. IMPRESSION:\nNo acute cardiopulmonary process.",
+    "dry_run": false
   }
 ]

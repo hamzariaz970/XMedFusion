@@ -5,6 +5,6 @@
   "page_count": 8,
   "max_tokens": 900,
   "temperature": 0.1,
-  "study_id": "valid_1000_a_1",
+  "study_id": "valid_1_a_1",
   "inference_image_count": 8
 }

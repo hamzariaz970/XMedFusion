@@ -9,9 +9,12 @@ from hf_ct_rate_endpoint import (
     StudyRecord,
     build_chat_payload,
     build_ct_rate_style_prompt,
+    build_inference_api_payload,
     build_user_content,
     build_volume_montage_pages,
+    clean_generated_report,
     discover_paths,
+    extract_inference_api_text,
     extract_report_text,
     image_to_data_url,
     load_study_records,
@@ -39,7 +42,8 @@ def test_normalize_endpoint_url_appends_v1():
 def test_page_selection_indices_spreads_pages():
     assert page_selection_indices(3, 8) == [0, 1, 2]
     assert page_selection_indices(10, 1) == [5]
-    assert page_selection_indices(10, 4) == [0, 3, 6, 9]
+    assert page_selection_indices(10, 4) == [1, 3, 6, 8]
+    assert page_selection_indices(13, 2) == [2, 11]
 
 
 def test_build_volume_montage_pages_limits_pages_and_tracks_metadata(tmp_path):
@@ -61,16 +65,18 @@ def test_build_ct_rate_style_prompt_mentions_page_ranges():
     prompt = build_ct_rate_style_prompt(
         patient_demo="65-year-old Male",
         page_metadata=[
-            {"page_index": 1, "slice_start": 1, "slice_end": 16},
-            {"page_index": 2, "slice_start": 17, "slice_end": 32},
+            {"page_index": 1, "slice_start": 1, "slice_end": 16, "source_page_index": 2},
+            {"page_index": 2, "slice_start": 17, "slice_end": 32, "source_page_index": 3},
         ],
     )
 
     assert "65-year-old Male" in prompt
-    assert "Page 1 covers slices 1 to 16." in prompt
-    assert "Page 2 covers slices 17 to 32." in prompt
+    assert "Page 1 covers slices 1 to 16 (source page 2)." in prompt
+    assert "Page 2 covers slices 17 to 32 (source page 3)." in prompt
     assert "FINDINGS:" in prompt
     assert "IMPRESSION:" in prompt
+    assert "Do not repeat the prompt" in prompt
+    assert "Do not invent lesion counts" in prompt
 
 
 def test_image_to_data_url_returns_jpeg_prefix():
@@ -104,6 +110,16 @@ def test_build_chat_payload_optionally_includes_model():
     assert payload_with_model["model"] == "endpoint-name"
 
 
+def test_build_inference_api_payload_adds_image_tokens():
+    pages = [Image.new("RGB", (32, 32), color="black"), Image.new("RGB", (32, 32), color="white")]
+    payload = build_inference_api_payload(prompt_text="Prompt text", montage_pages=pages, max_tokens=123, temperature=0.3)
+
+    assert payload["inputs"]["text"].startswith("<start_of_image> <start_of_image>\nPrompt text")
+    assert len(payload["inputs"]["images"]) == 2
+    assert payload["parameters"]["max_new_tokens"] == 123
+    assert payload["parameters"]["temperature"] == 0.3
+
+
 def test_extract_report_text_handles_string_and_list_shapes():
     string_shape = {"choices": [{"message": {"content": "FINDINGS:\nNormal.\n\nIMPRESSION:\nNormal."}}]}
     assert extract_report_text(string_shape).startswith("FINDINGS:")
@@ -120,6 +136,17 @@ def test_extract_report_text_handles_string_and_list_shapes():
         ]
     }
     assert "Mild opacity" in extract_report_text(list_shape)
+
+
+def test_extract_inference_api_text_handles_list_shape():
+    payload = [{"generated_text": "FINDINGS:\nClear lungs.\n\nIMPRESSION:\nNo acute abnormality."}]
+    assert extract_inference_api_text(payload).startswith("FINDINGS:")
+
+
+def test_clean_generated_report_strips_echoed_prompt():
+    prompt = "Prompt text"
+    raw = "Prompt text\n\nFINDINGS:\nClear lungs.\n\nIMPRESSION:\nNo acute abnormality."
+    assert clean_generated_report(raw, prompt_text=prompt).startswith("FINDINGS:")
 
 
 def test_load_study_records_reads_local_ct_rate_layout(tmp_path):
