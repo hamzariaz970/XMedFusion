@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, ElementType } from "react";
 import { useNavigate } from "react-router-dom";
 import { Layout } from "@/components/layout/Layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -377,7 +377,7 @@ function DashboardMetric({
   detail,
   tone = "primary",
 }: {
-  icon: any;
+  icon: ElementType;
   label: string;
   value: number | string;
   detail: string;
@@ -407,7 +407,7 @@ function PriorityItem({
   value,
   active,
 }: {
-  icon: any;
+  icon: ElementType;
   label: string;
   value: number | string;
   active?: boolean;
@@ -432,7 +432,7 @@ function EmptyState({
   action,
   onAction,
 }: {
-  icon: any;
+  icon: ElementType;
   title: string;
   copy: string;
   action: string;
@@ -454,3 +454,4 @@ function EmptyState({
 }
 
 export default DoctorDashboard;
+
