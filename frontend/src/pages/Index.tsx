@@ -5,46 +5,66 @@ import { radiologyImages } from "@/assets/radiology";
 import { Link } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
+import architectureImage from "@/assets/xmedfusion-architecture.png";
 import {
-  Activity,
   ArrowRight,
   Brain,
   CheckCircle2,
-  FileSearch,
   FileText,
+  Microscope,
   Network,
+  ScanSearch,
   ShieldCheck,
-  Upload,
-  Users,
+  Sparkles,
+  Stethoscope,
 } from "lucide-react";
 
-const stats = [
-  { value: "4+", label: "AI Agents" },
-  { value: "95%", label: "Evidence Focus" },
-  { value: "24/7", label: "AI Assistance" },
-  { value: "100+", label: "Clinical Signals" },
+const headlineMetrics = [
+  { label: "BLEU-1", baseline: "0.0493", value: "0.3359" },
+  { label: "ROUGE-L", baseline: "0.0863", value: "0.2440" },
+  { label: "Consistency", baseline: "2.38", value: "7.80" },
+  { label: "Accuracy", baseline: "2.34", value: "6.93" },
 ];
 
-const services = [
+const agentStages = [
   {
-    title: "Report Synthesis",
-    copy: "Turn X-ray and CT inputs into structured findings, impression, and recommendation sections.",
-    icon: FileText,
-    image: radiologyImages.laptopReview,
+    title: "Vision Agent",
+    icon: ScanSearch,
+    copy:
+      "Extracts dense image-grounded descriptions from lung fields, pleura, mediastinum, and cardiac silhouette instead of relying on a single black-box pass.",
   },
   {
-    title: "Virtual Review",
-    copy: "Review AI output with explainability, heatmaps, and human-in-the-loop feedback.",
-    icon: FileSearch,
-    image: radiologyImages.teamReview,
-    featured: true,
-  },
-  {
-    title: "Knowledge Discovery",
-    copy: "Connect anatomy, observations, and diagnostic claims through a clinical graph.",
+    title: "KG Agent",
     icon: Network,
-    image: radiologyImages.chestXrayReview,
+    copy:
+      "Builds a RadGraph-compliant knowledge graph from anatomy and observation nodes so clinical facts stay explicit and checkable.",
   },
+  {
+    title: "Retrieval & Draft Agent",
+    icon: FileText,
+    copy:
+      "Retrieves top-k similar cases to supply contextual scaffolding, reducing stylistic drift while keeping retrieval separate from final evidence control.",
+  },
+  {
+    title: "Synthesis Agent",
+    icon: Brain,
+    copy:
+      "Uses MedGemma 1.5:4B to iteratively reconcile vision evidence, knowledge graph facts, and retrieved context into a clinically coherent report.",
+  },
+];
+
+const strengths = [
+  "Structured perception replaces single-pass generation with explicit intermediate evidence.",
+  "Knowledge graph control reduces unsupported diagnostic statements and cross-modal inconsistency.",
+  "Evidence-prioritized synthesis resolves conflicts across agents before the final report is produced.",
+  "Explainability overlays and traceable findings let radiologists verify what the system actually saw.",
+];
+
+const explainabilityPoints = [
+  "Visual grounding overlays expose the scan regions behind generated findings.",
+  "Every final statement is traceable to upstream agent outputs rather than hidden decoder behavior.",
+  "The knowledge graph acts as a control signal that blocks hallucinated claims.",
+  "Radiologists can review evidence, report text, and explanations in one workflow.",
 ];
 
 const Index = () => {
@@ -68,163 +88,133 @@ const Index = () => {
     <Layout>
       <div className="figma-page">
         <section className="figma-container px-0 pt-0 md:px-8 md:pt-6 lg:px-10 xl:px-14">
-          <div className="figma-hero relative min-h-[calc(100vh-5rem)] overflow-hidden rounded-none p-7 text-white md:min-h-[620px] md:rounded-[38px] md:p-16">
-            <div className="relative z-10 max-w-2xl animate-slide-up">
-              <h1 className="max-w-xl text-4xl font-extrabold leading-[1.05] tracking-tight md:text-6xl">
-                Your Digital Gateway To{" "}
-                <span className="text-primary">Evidence-Linked</span> Radiology AI
-              </h1>
-              <p className="mt-7 max-w-lg text-lg leading-8 text-white/90">
-                Generate transparent reports, inspect AI reasoning, and guide each diagnosis with clinician-ready evidence.
-              </p>
-              <div className="mt-7 flex flex-col gap-3 sm:flex-row">
-                <Link to={session ? "/upload" : "/login"}>
-                  <Button variant="glass" size="lg" className="w-full rounded-full bg-white text-foreground hover:bg-white/90 sm:w-auto px-8">
-                    Upload Scan
-                  </Button>
-                </Link>
-                <Link to={session ? "/dashboard" : "/login"}>
-                  <Button size="lg" className="w-full rounded-full bg-primary text-white hover:bg-primary/90 sm:w-auto px-8">
-                    Dashboard
-                  </Button>
-                </Link>
-              </div>
-
-              <RadiologyImageCard
-                src={radiologyImages.laptopReview}
-                alt="Radiologists reviewing an X-ray on a laptop"
-                label="Live report review"
-                caption="AI draft + clinician approval"
-                className="mt-8 h-60 md:hidden"
-              />
-
-              <div className="mt-10 w-full max-w-[340px] rounded-[24px] bg-white/10 border border-white/20 p-5 text-white shadow-glow backdrop-blur-md">
-                <div className="flex items-center gap-4">
-                  <div className="h-12 w-12 rounded-2xl bg-white/20 flex items-center justify-center">
-                    <ShieldCheck className="h-6 w-6" />
+          <div className="figma-hero relative overflow-hidden rounded-none p-7 text-white md:rounded-[38px] md:p-16">
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(255,255,255,0.2),transparent_26%)]" />
+            <div className="absolute right-8 top-8 z-10 hidden md:block lg:right-10 lg:top-10">
+              <div className="animate-drift w-[320px] lg:w-[920px]">
+                <div className="overflow-hidden rounded-[30px] border border-white/20 bg-white/8 shadow-card backdrop-blur-sm transition-all duration-300 hover:scale-[1.04] hover:shadow-2xl hover:border-white/35 cursor-default">
+                  <img
+                    src={radiologyImages.laptopReview}
+                    alt="Radiologists reviewing an X-ray on a laptop"
+                    className="h-[320px] w-full object-cover object-center lg:h-[460px]"
+                    loading="lazy"
+                  />
+                </div>
+                <div className="mt-5 grid w-full grid-cols-1 gap-4 lg:grid-cols-3">
+                  <div className="group flex flex-col items-center justify-center rounded-[24px] border border-white/30 bg-white/95 px-4 py-5 text-center shadow-[0_8px_30px_rgb(0,0,0,0.08)] backdrop-blur-md transition-all duration-300 hover:-translate-y-1 hover:scale-[1.03] hover:shadow-[0_20px_40px_rgb(0,0,0,0.12)] cursor-default">
+                    <div className="mb-3 rounded-full bg-primary/10 p-2.5 text-primary transition-transform duration-300 group-hover:scale-110 group-hover:bg-primary/15">
+                      <ShieldCheck className="h-6 w-6" />
+                    </div>
+                    <p className="text-sm font-extrabold text-primary md:text-base">Transparent</p>
+                    <p className="mt-1 text-xs font-semibold leading-relaxed text-muted-foreground">Agent outputs stay reviewable</p>
                   </div>
-                  <div>
-                    <p className="text-sm font-bold">Clinical Evidence Layer</p>
-                    <p className="text-xs text-white/70">Verified by Multi-Agent Workflow</p>
+                  <div className="group flex flex-col items-center justify-center rounded-[24px] border border-white/30 bg-white/95 px-4 py-5 text-center shadow-[0_8px_30px_rgb(0,0,0,0.08)] backdrop-blur-md transition-all duration-300 hover:-translate-y-1 hover:scale-[1.03] hover:shadow-[0_20px_40px_rgb(0,0,0,0.12)] cursor-default">
+                    <div className="mb-3 rounded-full bg-primary/10 p-2.5 text-primary transition-transform duration-300 group-hover:scale-110 group-hover:bg-primary/15">
+                      <Network className="h-6 w-6" />
+                    </div>
+                    <p className="text-sm font-extrabold text-primary md:text-base">Multi-Agent</p>
+                    <p className="mt-1 text-xs font-semibold leading-relaxed text-muted-foreground">Decomposed clinical reasoning</p>
+                  </div>
+                  <div className="group flex flex-col items-center justify-center rounded-[24px] border border-white/30 bg-white/95 px-4 py-5 text-center shadow-[0_8px_30px_rgb(0,0,0,0.08)] backdrop-blur-md transition-all duration-300 hover:-translate-y-1 hover:scale-[1.03] hover:shadow-[0_20px_40px_rgb(0,0,0,0.12)] cursor-default">
+                    <div className="mb-3 rounded-full bg-primary/10 p-2.5 text-primary transition-transform duration-300 group-hover:scale-110 group-hover:bg-primary/15">
+                      <CheckCircle2 className="h-6 w-6" />
+                    </div>
+                    <p className="text-sm font-extrabold text-primary md:text-base">Grounded</p>
+                    <p className="mt-1 text-xs font-semibold leading-relaxed text-muted-foreground">No black-box generation</p>
                   </div>
                 </div>
               </div>
             </div>
-
-            <div className="absolute right-8 top-10 hidden h-full w-[48%] md:block">
-              <RadiologyImageCard
-                src={radiologyImages.laptopReview}
-                alt="Radiologists reviewing an X-ray on a laptop"
-                label="Live report review"
-                caption="AI draft + clinician approval"
-                className="absolute right-0 top-8 h-[410px] w-[92%] animate-drift"
-              />
-              <div className="report-glass-panel absolute left-0 top-24 w-64 animate-drift-delayed">
-                <div className="mb-3 flex items-center justify-between">
-                  <span className="text-xs font-bold uppercase text-muted-foreground">Report status</span>
-                  <span className="report-pulse-dot" />
+            <div className="relative z-10">
+              <div className="animate-slide-up md:max-w-[55%]">
+                <div className="eyebrow animate-fade-in border-white/20 bg-white/10 text-white shadow-none">
+                  NUST Final Year Project
                 </div>
-                <p className="text-lg font-extrabold text-foreground">Findings generated</p>
-                <div className="mt-4 space-y-2">
-                  <span className="block h-2 rounded-full bg-primary/30" />
-                  <span className="block h-2 w-4/5 rounded-full bg-primary/20" />
-                  <span className="block h-2 w-2/3 rounded-full bg-primary/20" />
-                </div>
-              </div>
-              <div className="report-glass-panel absolute bottom-24 right-10 w-72">
-                <div className="flex items-center gap-3">
-                  <Brain className="h-9 w-9 text-primary" />
-                  <div>
-                    <p className="font-extrabold text-foreground">Evidence linked</p>
-                    <p className="text-xs text-muted-foreground">Scan regions mapped to report text</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section className="figma-container figma-section">
-          <div className="grid gap-10 md:grid-cols-[1.1fr_0.9fr] md:items-start">
-            <div>
-              <p className="mb-14 text-2xl font-semibold">About Us.</p>
-              <h2 className="max-w-2xl text-4xl font-extrabold leading-tight tracking-tight md:text-6xl">
-                Transforming The Way You <span className="text-primary">Access</span> Medical Imaging Care
-              </h2>
-            </div>
-            <p className="text-lg leading-8 text-muted-foreground md:pt-20">
-              XMedFusion is an AI-assisted radiology workspace designed to make imaging analysis clearer, faster, and safer. It connects reports, scan evidence, knowledge graphs, and physician review in one trusted flow.
-            </p>
-          </div>
-
-          <div className="mt-16 grid grid-cols-2 gap-8 md:grid-cols-4">
-            {stats.map((stat, index) => (
-              <div key={stat.label} className="animate-slide-up" style={{ animationDelay: `${index * 90}ms` }}>
-                <p className="figma-stat">{stat.value}</p>
-                <p className="mt-3 text-sm text-muted-foreground">{stat.label}</p>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <section className="figma-container figma-section">
-          <p className="mb-12 text-2xl font-semibold">Why Choose Us.</p>
-          <div className="grid gap-8">
-            <div className="grid gap-8 md:grid-cols-[0.9fr_1.1fr] md:items-end">
-              <p className="max-w-md text-base leading-7 text-muted-foreground md:order-1 md:self-end">
-                Get immediate support with agent-guided report synthesis, evidence links, and clinical review tools.
-              </p>
-              <h2 className="text-right text-4xl font-extrabold leading-tight tracking-tight md:text-5xl">
-                Smart <span className="text-primary">24/7<br />AI Assistance</span><br />For Instant Support
-              </h2>
-            </div>
-            <div className="relative h-[280px] overflow-hidden rounded-[34px] shadow-card">
-              <RadiologyImageCard
-                src={radiologyImages.digitalConsult}
-                alt="Doctors reviewing an X-ray digitally during consultation"
-                label="Scan intake ready"
-                caption="Vision + retrieval + KG"
-                className="h-full"
-              />
-              <div className="report-glass-panel absolute right-8 top-8 hidden w-72 md:block">
-                <div className="flex items-center gap-3">
-                  <Brain className="h-8 w-8 text-primary" />
-                  <div>
-                    <p className="font-bold">Agent triage</p>
-                    <p className="text-xs text-muted-foreground">Processing image evidence</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="grid gap-8 pt-8 md:grid-cols-[0.8fr_1.2fr] md:items-center">
-              <div>
-                <h2 className="text-4xl font-extrabold leading-tight tracking-tight md:text-5xl">
-                  Experienced Doctors You Can <span className="text-primary">Trust</span>
-                </h2>
-                <p className="mt-28 max-w-sm text-base leading-7 text-muted-foreground">
-                  Keep radiologists in control with editable reports, expert labels, and feedback loops for better models.
+                <h1 className="mt-6 max-w-4xl animate-slide-up text-4xl font-extrabold leading-[1.02] tracking-tight md:text-6xl">
+                  XMedFusion brings transparent, evidence-grounded AI to radiology report generation.
+                </h1>
+                <p className="mt-6 max-w-2xl animate-slide-up text-lg leading-8 text-white/88 stagger-1">
+                  Our multi-agent framework decomposes chest X-ray reporting into visual perception, knowledge graph construction, retrieval-guided drafting, and evidence-prioritized synthesis to reduce hallucinations and improve diagnostic reliability.
                 </p>
-              </div>
-              <div className="relative min-h-[430px]">
+                <div className="mt-8 flex flex-wrap gap-3 animate-slide-up stagger-2">
+                  <span className="medical-chip border-white/15 bg-white/10 text-white">IU X-ray benchmark</span>
+                  <span className="medical-chip border-white/15 bg-white/10 text-white">BioMedCLIP + MedGemma 1.5:4B</span>
+                  <span className="medical-chip border-white/15 bg-white/10 text-white">Explainable report generation</span>
+                </div>
+                <div className="mt-8 flex flex-col gap-3 animate-slide-up stagger-3 sm:flex-row">
+                  <Link to={session ? "/upload" : "/login"}>
+                    <Button variant="glass" size="lg" className="w-full rounded-full bg-white px-8 text-foreground hover:bg-white/90 sm:w-auto">
+                      Upload Scan
+                    </Button>
+                  </Link>
+                  <Link to={session ? "/dashboard" : "/login"}>
+                    <Button size="lg" className="w-full rounded-full bg-primary px-8 text-white hover:bg-primary/90 sm:w-auto">
+                      Open Workspace
+                    </Button>
+                  </Link>
+                </div>
                 <RadiologyImageCard
-                  src={radiologyImages.patientExplanation}
-                  alt="Doctor explaining an X-ray to a patient"
-                  label="Human approved"
-                  caption="Editable reports before final sign-off"
-                  className="blob-card absolute inset-0"
+                  src={radiologyImages.laptopReview}
+                  alt="Radiologists reviewing an X-ray on a laptop"
+                  label="Live report review"
+                  caption="Evidence-linked findings for clinician approval"
+                  className="mt-8 h-60 animate-slide-up md:hidden"
                 />
-                <div className="absolute left-8 top-8 hidden rounded-[24px] bg-white/90 p-4 shadow-card backdrop-blur md:block">
-                  <div className="flex items-center gap-3">
-                    <CheckCircle2 className="h-8 w-8 text-primary" />
+                <div className="mt-5 grid w-full grid-cols-1 gap-4 animate-slide-up md:hidden">
+                  <div className="group flex flex-col items-center justify-center rounded-[24px] border border-white/30 bg-white/95 px-4 py-5 text-center shadow-[0_8px_30px_rgb(0,0,0,0.08)] backdrop-blur-md transition-all duration-300 hover:-translate-y-1 hover:scale-[1.03] hover:shadow-[0_20px_40px_rgb(0,0,0,0.12)] cursor-default">
+                    <div className="mb-3 rounded-full bg-primary/10 p-2.5 text-primary transition-transform duration-300 group-hover:scale-110 group-hover:bg-primary/15">
+                      <ShieldCheck className="h-6 w-6" />
+                    </div>
+                    <p className="text-sm font-extrabold text-primary md:text-base">Transparent</p>
+                    <p className="mt-1 text-xs font-semibold leading-relaxed text-muted-foreground">Agent outputs stay reviewable</p>
+                  </div>
+                  <div className="group flex flex-col items-center justify-center rounded-[24px] border border-white/30 bg-white/95 px-4 py-5 text-center shadow-[0_8px_30px_rgb(0,0,0,0.08)] backdrop-blur-md transition-all duration-300 hover:-translate-y-1 hover:scale-[1.03] hover:shadow-[0_20px_40px_rgb(0,0,0,0.12)] cursor-default">
+                    <div className="mb-3 rounded-full bg-primary/10 p-2.5 text-primary transition-transform duration-300 group-hover:scale-110 group-hover:bg-primary/15">
+                      <Network className="h-6 w-6" />
+                    </div>
+                    <p className="text-sm font-extrabold text-primary md:text-base">Multi-Agent</p>
+                    <p className="mt-1 text-xs font-semibold leading-relaxed text-muted-foreground">Decomposed clinical reasoning</p>
+                  </div>
+                  <div className="group flex flex-col items-center justify-center rounded-[24px] border border-white/30 bg-white/95 px-4 py-5 text-center shadow-[0_8px_30px_rgb(0,0,0,0.08)] backdrop-blur-md transition-all duration-300 hover:-translate-y-1 hover:scale-[1.03] hover:shadow-[0_20px_40px_rgb(0,0,0,0.12)] cursor-default">
+                    <div className="mb-3 rounded-full bg-primary/10 p-2.5 text-primary transition-transform duration-300 group-hover:scale-110 group-hover:bg-primary/15">
+                      <CheckCircle2 className="h-6 w-6" />
+                    </div>
+                    <p className="text-sm font-extrabold text-primary md:text-base">Grounded</p>
+                    <p className="mt-1 text-xs font-semibold leading-relaxed text-muted-foreground">No black-box generation</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-8 grid gap-4 md:mt-[380px] lg:mt-16 xl:mt-24 2xl:mt-32">
+                <div className="report-glass-panel animate-float-soft border-white/15 bg-white/10 text-white transition-all duration-300 hover:scale-[1.02] hover:bg-white/15 hover:shadow-xl cursor-default">
+                  <div className="flex items-start gap-4">
+                    <ShieldCheck className="mt-1 h-8 w-8 text-white transition-transform duration-300 group-hover:rotate-6" />
                     <div>
-                      <p className="font-bold">Clinician verified</p>
-                      <p className="text-xs text-muted-foreground">Every report stays reviewable</p>
+                      <p className="text-xl font-bold">Why it outperforms traditional models</p>
+                      <p className="mt-2 text-base leading-7 text-white/80">
+                        Traditional end-to-end VLMs often miss subtle regional cues and produce unsupported findings. XMedFusion inserts explicit evidence checks between perception and generation.
+                      </p>
                     </div>
                   </div>
                 </div>
-                <div className="absolute bottom-14 right-10 circle-button">
-                  <ArrowRight className="h-8 w-8" />
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                  {headlineMetrics.map((metric, index) => (
+                    <div key={metric.label} className="animate-slide-up h-full" style={{ animationDelay: `${index * 90}ms` }}>
+                      <div className="h-full rounded-[24px] border border-white/15 bg-white/10 p-5 shadow-glow backdrop-blur-md transition-all duration-300 hover:scale-105 hover:bg-white/18 hover:shadow-xl cursor-default">
+                        <p className="text-sm font-bold uppercase tracking-[0.2em] text-white/60">{metric.label}</p>
+                        <div className="mt-3 flex items-end justify-between gap-3">
+                          <div>
+                            <p className="text-3xl font-extrabold">{metric.value}</p>
+                            <p className="text-sm text-white/70">XMedFusion</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-base font-semibold text-white/75">{metric.baseline}</p>
+                            <p className="text-sm text-white/60">LLaVA-Med 1.5</p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
             </div>
@@ -232,81 +222,56 @@ const Index = () => {
         </section>
 
         <section className="figma-container figma-section">
-          <div className="mb-16 grid gap-8 md:grid-cols-2 md:items-end">
-            <div>
-              <p className="mb-14 text-2xl font-semibold">Our Doctors.</p>
-              <h2 className="text-4xl font-extrabold leading-tight tracking-tight md:text-6xl">
-                Our <span className="text-primary">Professional</span><br />Expert
+          <div className="grid gap-8 lg:grid-cols-[0.9fr_1.1fr]">
+            <div className="surface-card animate-slide-up p-8 md:p-10">
+              <div className="eyebrow">Project Focus</div>
+              <h2 className="mt-6 animate-sheen pb-4 text-3xl font-extrabold leading-tight md:text-5xl">
+                Built for faster, more reliable, and more interpretable radiology reporting.
               </h2>
-            </div>
-            <p className="max-w-md text-right text-lg leading-8 text-muted-foreground md:justify-self-end">
-              We support qualified clinicians with radiology-focused automation, transparent evidence, and human approval tools.
-            </p>
-          </div>
-
-          <div className="grid gap-8 overflow-hidden md:grid-cols-[1fr_1fr_0.7fr]">
-            <div className="blue-panel min-h-[420px] p-10">
-              <h3 className="text-4xl font-semibold">Radiology Lead</h3>
-              <p className="mt-2 text-xl text-white/80">Clinical review team.</p>
-              <p className="mt-12 max-w-sm text-lg leading-7 text-white/80">
-                Expert physicians can approve, correct, and strengthen every AI-generated report before it becomes part of the patient record.
+              <p className="mt-8 max-w-xl text-base leading-8 text-muted-foreground">
+                The project targets automated generation of Findings and Impression sections for chest radiographs while preserving traceable evidence at each stage of the pipeline.
               </p>
-              <div className="absolute bottom-10 left-10 flex gap-4 text-white/90">
-                <span className="h-8 w-8 rounded-full border border-white/50 text-center leading-8">f</span>
-                <span className="h-8 w-8 rounded-full border border-white/50 text-center leading-8">x</span>
-                <span className="h-8 w-8 rounded-full border border-white/50 text-center leading-8">in</span>
-              </div>
-            </div>
-            <DoctorVisual name="Evidence first" image={radiologyImages.teamReview} />
-            <DoctorVisual name="Human approved" image={radiologyImages.neuroReview} compact />
-          </div>
-        </section>
-
-        <section className="figma-section bg-white/65">
-          <div className="figma-container grid gap-10 md:grid-cols-[0.85fr_1.15fr] md:items-center">
-            <div>
-              <p className="mb-14 text-2xl font-semibold">User Experience.</p>
-              <h2 className="text-4xl font-extrabold leading-tight tracking-tight md:text-6xl">
-                What Doctors<br />Are Saying
-              </h2>
-              <p className="mt-16 max-w-sm text-lg leading-8 text-muted-foreground">
-                Radiologists across clinical centers rely on XMedFusion for faster reporting and verifiable evidence links.
-              </p>
-              <Link to={session ? "/upload" : "/login"} className="mt-10 inline-flex circle-button">
-                <ArrowRight className="h-8 w-8" />
-              </Link>
-            </div>
-            <div className="relative min-h-[390px]">
-              <div className="blue-panel ml-auto min-h-[330px] max-w-[580px] p-12">
-                <p className="text-7xl font-black leading-none text-white">“</p>
-                <h3 className="mt-2 max-w-md text-4xl font-semibold leading-tight">Secure, fast, and so convenient.</h3>
-                <p className="mt-5 max-w-md text-lg leading-7 text-white/80">
-                  The diagnostic workspace keeps scan evidence, AI reasoning, and physician review in one place.
-                </p>
-                <p className="absolute bottom-14 right-14 text-2xl font-semibold">Clinical User</p>
-              </div>
               <RadiologyImageCard
-                src={radiologyImages.chestXrayReview}
-                alt="Radiologist examining chest X-ray"
-                className="absolute bottom-10 left-8 h-32 w-36 rounded-[28px]"
-                scanLine={false}
+                src={radiologyImages.digitalConsult}
+                alt="Doctors digitally consulting over chest X-ray data"
+                label="Clinical context"
+                caption="Imaging backlogs and expert review needs"
+                className="mt-8 h-64 animate-float-soft"
               />
             </div>
-          </div>
-          <div className="mt-16 bg-muted/80 py-8">
-            <div className="figma-container grid gap-6 md:grid-cols-3">
+
+            <div className="grid gap-5 md:grid-cols-2">
               {[
-                ["25", "years of research practice."],
-                ["Quality", "Evidence links at every step."],
-                ["24/7", "AI support for clinical teams."],
-              ].map(([big, copy]) => (
-                <div key={copy} className="flex items-center gap-5">
-                  <div className="flex h-20 w-20 items-center justify-center rounded-full bg-white shadow-sm">
-                    <ShieldCheck className="h-8 w-8 text-muted-foreground" />
-                  </div>
-                  <div>
-                    <p className="text-3xl font-bold">{big}</p>
-                    <p className="text-muted-foreground">{copy}</p>
+                {
+                  title: "Clinical problem",
+                  icon: Stethoscope,
+                  copy:
+                    "Radiology reporting is time-intensive, imaging volumes are rising, and fatigue makes manual interpretation vulnerable to error.",
+                },
+                {
+                  title: "Research gap",
+                  icon: Microscope,
+                  copy:
+                    "Prior systems do not combine image-grounded evidence extraction, structured KG control, and iterative evidence-prioritized synthesis in one unified framework.",
+                },
+                {
+                  title: "Core objective",
+                  icon: Brain,
+                  copy:
+                    "Generate clinically useful reports with stronger visual grounding, reduced hallucinations, and explicit intermediate verification.",
+                },
+                {
+                  title: "Evaluation setup",
+                  icon: CheckCircle2,
+                  copy:
+                    "Benchmarked on the IU X-ray dataset with 2,068 training pairs and 590 test pairs using lexical and LLM-as-a-judge semantic metrics.",
+                },
+              ].map((item, index) => (
+                <div key={item.title} className="animate-slide-up h-full" style={{ animationDelay: `${index * 80}ms` }}>
+                  <div className="surface-card h-full p-6 transition-all duration-300 hover:scale-[1.04] hover:shadow-xl cursor-default">
+                    <item.icon className="h-8 w-8 text-primary transition-transform duration-300 hover:scale-110" />
+                    <h3 className="mt-5 text-2xl font-bold">{item.title}</h3>
+                    <p className="mt-3 text-base leading-7 text-muted-foreground">{item.copy}</p>
                   </div>
                 </div>
               ))}
@@ -315,65 +280,165 @@ const Index = () => {
         </section>
 
         <section className="figma-container figma-section">
-          <div className="mb-14 grid gap-8 md:grid-cols-2 md:items-end">
+          <div className="mb-10 flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
             <div>
-              <p className="mb-10 text-2xl font-semibold">Our Services</p>
-              <h2 className="max-w-2xl text-4xl font-extrabold leading-tight tracking-tight md:text-6xl">
-                We Will Serve You With Healthcare Services
+              <div className="eyebrow">Agentic Pipeline</div>
+              <h2 className="mt-5 animate-sheen text-4xl font-extrabold leading-tight tracking-tight md:text-5xl">
+                Four specialized agents, one evidence-backed report.
               </h2>
             </div>
-            <div className="space-y-8 md:text-right">
-              <p className="text-lg leading-8 text-muted-foreground">
-                A complete workspace for interpretation, review, and transparent clinical delivery.
-              </p>
-              <Link to={session ? "/upload" : "/login"}>
-                <Button variant="outline" size="lg" className="rounded-full px-8">
-                  Try Diagnosis
-                  <ArrowRight className="h-5 w-5" />
-                </Button>
-              </Link>
-            </div>
+            <p className="max-w-2xl animate-slide-up text-base leading-8 text-muted-foreground">
+              XMedFusion does not ask one model to do everything. Each component owns a distinct evidential role, which makes the final report easier to validate and more robust than traditional single-pass generation.
+            </p>
           </div>
 
-          <div className="grid gap-6 md:grid-cols-3">
-            {services.map((service) => (
-              <div
-                key={service.title}
-                className={service.featured ? "rounded-[26px] bg-primary p-7 text-white shadow-card transition-all duration-300 hover:-translate-y-2" : "rounded-[26px] border border-border bg-white p-7 shadow-sm transition-all duration-300 hover:-translate-y-2 hover:shadow-card"}
-              >
-                <div className="mb-8 flex items-start justify-between gap-4">
-                  <h3 className="max-w-[220px] text-4xl font-extrabold leading-tight">{service.title}</h3>
-                  <span className={service.featured ? "flex h-10 w-10 items-center justify-center rounded-full bg-white text-primary" : "flex h-10 w-10 items-center justify-center rounded-full bg-foreground text-white"}>
-                    <ArrowRight className="-rotate-45" />
-                  </span>
+          <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-4">
+            {agentStages.map((stage, index) => (
+              <div key={stage.title} className="animate-slide-up h-full" style={{ animationDelay: `${index * 85}ms` }}>
+                <div className="surface-card h-full p-6 transition-all duration-300 hover:scale-[1.04] hover:shadow-xl cursor-default">
+                  <stage.icon className="h-8 w-8 text-primary transition-transform duration-300 hover:scale-110" />
+                  <h3 className="mt-5 text-2xl font-bold">{stage.title}</h3>
+                  <p className="mt-3 text-base leading-7 text-muted-foreground">{stage.copy}</p>
                 </div>
-                <p className={service.featured ? "text-lg leading-7 text-white/80" : "text-lg leading-7 text-muted-foreground"}>{service.copy}</p>
-                <ServiceVisual image={service.image} title={service.title} featured={service.featured} />
               </div>
             ))}
+          </div>
+
+          <div className="mt-8 overflow-hidden rounded-[32px] border border-border/70 bg-white p-4 shadow-card animate-slide-up transition-all duration-300 hover:shadow-xl md:p-6">
+            <div className="mb-5 flex items-center justify-between gap-4">
+              <div>
+                <p className="text-xl font-bold">Complete system architecture</p>
+                <p className="text-base text-muted-foreground">
+                  Directly adapted from the project presentation and embedded into the landing page.
+                </p>
+              </div>
+              <span className="hidden rounded-full bg-primary/10 px-4 py-2 text-sm font-bold uppercase tracking-[0.18em] text-primary md:inline-flex">
+                Stage 1 to Stage 3
+              </span>
+            </div>
+            <div className="rounded-[26px] bg-[linear-gradient(180deg,rgba(237,244,255,0.9),rgba(255,255,255,0.95))] p-3">
+              <img
+                src={architectureImage}
+                alt="XMedFusion multi-agent architecture showing preprocessing, parallel agentic processing, and synthesis with explainability"
+                className="w-full rounded-[20px] border border-primary/10 bg-white object-cover"
+                loading="lazy"
+              />
+            </div>
+          </div>
+        </section>
+
+        <section className="figma-section bg-white/65">
+          <div className="figma-container grid gap-8 lg:grid-cols-[1.05fr_0.95fr]">
+            <div className="surface-card animate-slide-up p-8 md:p-10">
+              <div className="eyebrow">Performance</div>
+              <h2 className="mt-6 animate-sheen text-4xl font-extrabold leading-tight tracking-tight md:text-5xl">
+                Stronger results than the baseline across lexical and semantic quality.
+              </h2>
+              <p className="mt-6 text-base leading-8 text-muted-foreground">
+                On the IU X-ray test set, XMedFusion outperformed LLaVA-Med 1.5 on BLEU, ROUGE, METEOR, coverage, consistency, accuracy, style, and conciseness. The gains come from explicit evidence decomposition instead of direct end-to-end report generation.
+              </p>
+              <RadiologyImageCard
+                src={radiologyImages.teamReview}
+                alt="Clinical team reviewing radiology output"
+                label="Benchmark review"
+                caption="Human-readable comparisons with grounded evidence"
+                className="mt-8 h-60 animate-float-soft"
+              />
+              <div className="mt-8 grid gap-4 sm:grid-cols-2">
+                {[
+                  "ROUGE-2 improved from 0.0213 to 0.1328.",
+                  "METEOR improved from 0.0829 to 0.1708.",
+                  "Coverage improved from 2.54 to 5.73.",
+                  "Conciseness improved from 2.16 to 7.33.",
+                ].map((line, index) => (
+                  <div key={line} className="animate-slide-up" style={{ animationDelay: `${index * 70}ms` }}>
+                    <div className="rounded-[22px] bg-primary/6 p-4 text-base font-medium leading-7 text-foreground transition-all duration-300 hover:scale-[1.03] hover:bg-primary/10 hover:shadow-md cursor-default">
+                      {line}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="clinical-dark-panel animate-slide-up p-8 md:p-10">
+              <div className="eyebrow border-white/15 bg-white/10 text-white shadow-none">Why It Works Better</div>
+              <div className="mt-6 space-y-4">
+                {strengths.map((point, index) => (
+                  <div key={point} className="animate-slide-up" style={{ animationDelay: `${index * 75}ms` }}>
+                    <div className="rounded-[22px] border border-white/10 bg-white/8 p-5 transition-all duration-300 hover:scale-[1.03] hover:bg-white/14 hover:border-white/20 hover:shadow-lg cursor-default">
+                      <p className="text-base leading-7 text-white/86">{point}</p>
+                    </div>
+                  </div>
+                ))}
+                <RadiologyImageCard
+                  src={radiologyImages.chestXrayReview}
+                  alt="Radiologist examining chest X-ray"
+                  label="Traditional vs XMedFusion"
+                  caption="Grounded multi-stage reasoning improves reliability"
+                  className="mt-6 h-56"
+                  scanLine={false}
+                />
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section className="figma-container figma-section">
+          <div className="grid gap-8 lg:grid-cols-[0.95fr_1.05fr]">
+            <div className="clinical-dark-panel animate-slide-up p-8 md:p-10">
+              <div className="eyebrow border-white/15 bg-white/10 text-white shadow-none">Explainability</div>
+              <h2 className="mt-6 animate-sheen text-4xl font-extrabold leading-tight tracking-tight md:text-5xl">
+                Transparent by design, not as an afterthought.
+              </h2>
+              <p className="mt-6 text-base leading-8 text-white/80">
+                The system presentation emphasizes traceable evidence paths, visual grounding, and radiologist verification. That makes the homepage narrative align with the product itself: the report, the graph, and the explanation module all support one another.
+              </p>
+              <RadiologyImageCard
+                src={radiologyImages.patientExplanation}
+                alt="Doctor explaining radiology findings to a patient"
+                label="Explainability in practice"
+                caption="Evidence stays understandable beyond the model output"
+                className="mt-8 h-72"
+                scanLine={false}
+              />
+            </div>
+
+            <div className="grid gap-5 md:grid-cols-2">
+              {explainabilityPoints.map((point, index) => (
+                <div key={point} className="animate-slide-up h-full" style={{ animationDelay: `${index * 80}ms` }}>
+                  <div className="surface-card h-full p-6 transition-all duration-300 hover:scale-[1.04] hover:shadow-xl cursor-default">
+                    <Sparkles className="h-7 w-7 text-primary transition-transform duration-300 hover:scale-110 hover:rotate-12" />
+                    <p className="mt-4 text-base leading-7 text-muted-foreground">{point}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         </section>
 
         <section className="figma-container pb-20">
           <div className="relative overflow-hidden rounded-[28px] bg-primary p-10 text-white md:p-16">
-            <div className="relative z-10 max-w-2xl">
-              <h2 className="text-4xl font-extrabold leading-tight md:text-6xl">
-                Schedule Your Analysis With Us
+            <div className="relative z-10 max-w-3xl">
+              <div className="eyebrow border-white/15 bg-white/10 text-white shadow-none">Project Summary</div>
+              <h2 className="mt-6 animate-sheen text-4xl font-extrabold leading-tight md:text-6xl">
+                XMedFusion moves beyond generic VLM reporting toward structured, trustworthy diagnostic AI.
               </h2>
-              <p className="mt-6 max-w-2xl text-lg leading-8 text-white/80">
-                Choose your patient, upload a scan, and let XMedFusion assemble a transparent report ready for clinical review.
+              <p className="mt-6 max-w-2xl animate-slide-up text-lg leading-8 text-white/82">
+                The home page now reflects the actual final year project: modular perception, neuro-symbolic reasoning, evidence-prioritized synthesis, and benchmarked gains in reliability and interpretability.
               </p>
               <Link to={session ? "/upload" : "/login"} className="mt-9 inline-flex">
-                <Button variant="glass" size="lg" className="rounded-full bg-white text-foreground hover:bg-white/90 px-10">
-                  Upload Scan
+                <Button variant="glass" size="lg" className="rounded-full bg-white px-10 text-foreground hover:bg-white/90">
+                  Try the workflow
                   <ArrowRight className="h-5 w-5" />
                 </Button>
               </Link>
             </div>
             <RadiologyImageCard
-              src={radiologyImages.teamReview}
-              alt="Radiology team reviewing imaging"
-              className="absolute right-8 top-8 hidden h-56 w-72 rotate-3 rounded-[30px] md:block"
+              src={radiologyImages.neuroReview}
+              alt="Radiologist reviewing medical imaging"
+              label="Clinical trust"
+              caption="Built for reviewable AI-assisted reporting"
+              className="absolute right-8 top-8 hidden h-60 w-72 rotate-3 md:block"
               scanLine={false}
             />
           </div>
@@ -382,29 +447,5 @@ const Index = () => {
     </Layout>
   );
 };
-
-const DoctorVisual = ({ name, image, compact }: { name: string; image: string; compact?: boolean }) => (
-  <div className={compact ? "soft-image-card group relative min-h-[420px] min-w-[260px]" : "soft-image-card group relative min-h-[420px]"}>
-    <img src={image} alt={`${name} radiology review`} className="absolute inset-0 h-full w-full object-cover transition-transform duration-700 group-hover:scale-105" loading="lazy" />
-    <div className="absolute inset-0 bg-gradient-to-t from-clinical-ink/70 via-transparent to-transparent" />
-    <div className="absolute bottom-8 left-8 right-8 flex items-center gap-4 rounded-[22px] bg-white/90 p-4 shadow-sm backdrop-blur">
-      <Users className="h-9 w-9 text-primary" />
-      <div>
-        <p className="font-bold">{name}</p>
-        <p className="text-sm text-muted-foreground">Specialist review</p>
-      </div>
-    </div>
-  </div>
-);
-
-const ServiceVisual = ({ image, title, featured }: { image: string; title: string; featured?: boolean }) => (
-  <RadiologyImageCard
-    src={image}
-    alt={`${title} workflow`}
-    className={featured ? "mt-10 h-48 rounded-[20px]" : "mt-10 h-48 rounded-[20px]"}
-    overlayClassName={featured ? "bg-white/95" : undefined}
-    scanLine={featured}
-  />
-);
 
 export default Index;
