@@ -71,7 +71,7 @@ const ExplainabilityModule = () => {
     <Layout>
       <div className="figma-page-shell min-h-[80vh]">
         {/* Header Section */}
-        <div className="figma-workspace-hero mb-8 grid w-full gap-6 text-left lg:grid-cols-[1fr_380px] lg:items-center">
+        <div className="figma-workspace-hero mb-8 flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <Badge variant="outline" className="eyebrow mb-4">
               <Sparkles className="w-4 h-4" /> AI Interpretability
@@ -80,16 +80,16 @@ const ExplainabilityModule = () => {
               Explainability <span className="text-primary">Module</span>
             </h1>
             <p className="max-w-2xl text-muted-foreground">
-              Visualize the evidence behind generated reports with the model input image, generated highlights, and an AI narrative.
+              Visualize the evidence behind generated reports with categorical anatomical highlights and automated diagnostic reasoning.
             </p>
           </div>
-          <RadiologyImageCard
-            src={displayReferenceImage || radiologyImages.neuroReview}
-            alt="Radiology explainability review"
-            label="Visual evidence"
-            caption={displayReferenceImage ? inputPanelHint : "Heatmaps and narrative review"}
-            className="min-h-[240px]"
-          />
+          {displayReferenceImage && (
+            <div className="w-full lg:w-[380px] p-4 rounded-[28px] border border-primary/20 bg-primary/5">
+              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Evidence Context</p>
+              <p className="font-bold text-foreground truncate">{displayReferenceImage.split('/').pop()}</p>
+              <p className="text-xs text-muted-foreground mt-1">{inputPanelHint}</p>
+            </div>
+          )}
         </div>
 
         {!displayReferenceImage ? (
@@ -122,19 +122,23 @@ const ExplainabilityModule = () => {
                 </CardContent>
               </Card>
 
-              {/* CARD 2: Insights Heatmap / Bounding Boxes */}
+              {/* CARD 2: AI-Annotated Scan */}
               <Card className="surface-card overflow-hidden">
                 <CardHeader className="border-b border-border/50 bg-secondary/40">
                   <CardTitle className="text-sm font-medium flex items-center gap-2">
-                    <Info className="w-4 h-4 text-primary" /> Visual Insights
+                    <Info className="w-4 h-4 text-primary" /> AI-Annotated Scan
                   </CardTitle>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Anatomical regions highlighted by categorical findings.{" "}
+                    <span className="font-semibold text-primary">Border thickness</span> = Confidence level.
+                  </p>
                 </CardHeader>
                 <CardContent className="relative flex aspect-square items-center justify-center bg-clinical-ink p-4">
                   {/* DIRECTLY USE heatmapData FROM CONTEXT */}
                   {heatmapData ? (
                     <img
                       src={heatmapData}
-                      alt="Heatmap"
+                      alt="AI-annotated scan with disease bounding boxes"
                       className="max-h-full rounded-[18px] object-contain opacity-100 transition-opacity duration-700"
                     />
                   ) : (

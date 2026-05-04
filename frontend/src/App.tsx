@@ -16,7 +16,6 @@ import DoctorDashboard from "./pages/DoctorDashboard";
 import PatientDashboard from "./pages/PatientDashboard";
 import UploadXray from "./pages/UploadXray";
 import ExplainabilityModule from "./pages/ExplainabilityModule";
-import ImageMapping from "./pages/ImageMapping";
 import KnowledgeGraphPage from "./pages/KnowledgeGraphPage";
 import NotFound from "./pages/NotFound";
 import HILLabelingPage from "./pages/HILLabelingPage";
@@ -65,7 +64,6 @@ const App = () => (
                   <Route path="/patients" element={<PatientDashboard />} />
                   <Route path="/upload" element={<UploadXray />} />
                   <Route path="/explainability" element={<ExplainabilityModule />} />
-                  <Route path="/image-mapping" element={<ImageMapping />} />
                   <Route path="/hil/task/:taskId" element={<HILLabelingPage />} />
                 </Route>
 
