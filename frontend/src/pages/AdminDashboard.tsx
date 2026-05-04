@@ -101,6 +101,8 @@ const AdminDashboard = () => {
   // HIL state
   const [hilTasks, setHilTasks] = useState<HILTask[]>([]);
   const [hilModalOpen, setHilModalOpen] = useState(false);
+  const [hilModalMode, setHilModalMode] = useState<"new"|"existing">("new");
+  const [hilAddToTaskId, setHilAddToTaskId] = useState("");
   const [hilTitle, setHilTitle] = useState("");
   const [hilInstructions, setHilInstructions] = useState("");
   const [hilDoctorId, setHilDoctorId] = useState("");
@@ -111,6 +113,9 @@ const AdminDashboard = () => {
   const [clinicalFeedback, setClinicalFeedback] = useState<ClinicalFeedbackRow[]>([]);
   const [selectedFeedbackIds, setSelectedFeedbackIds] = useState<Set<string>>(new Set());
   const [batchApproving, setBatchApproving] = useState(false);
+  const [finetuneConfirmTaskId, setFinetuneConfirmTaskId] = useState<string|null>(null);
+  const [finetuneSuccessOpen, setFinetuneSuccessOpen] = useState(false);
+  const [finetuneSuccessInfo, setFinetuneSuccessInfo] = useState<{samples:number;taskTitle:string}>({samples:0,taskTitle:""});
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const fetchDoctors = useCallback(async () => {
@@ -162,7 +167,7 @@ const AdminDashboard = () => {
   }, []);
 
   const fetchHilTasks = useCallback(async () => {
-    const { data } = await supabase.from("hil_tasks").select("*").order("created_at", { ascending: false });
+    const { data } = await supabase.from("hil_tasks").select("*").neq("status", "reviewed").order("created_at", { ascending: false });
     if (data) setHilTasks(data);
   }, []);
 
@@ -321,6 +326,39 @@ const AdminDashboard = () => {
     } catch (e: any) { toast.error(e.message); } finally { setSaving(false); }
   };
 
+  const handleAddScansToTask = async () => {
+    if (!hilAddToTaskId || hilFiles.length === 0) { toast.error("Please select a batch and at least one scan."); return; }
+    setSaving(true);
+    try {
+      // Get the current max scan_order for this task
+      const { data: existingScans } = await supabase
+        .from("hil_scans").select("scan_order").eq("task_id", hilAddToTaskId).order("scan_order", { ascending: false }).limit(1);
+      const startOrder = existingScans && existingScans.length > 0 ? (existingScans[0].scan_order + 1) : 0;
+
+      for (let i = 0; i < hilFiles.length; i++) {
+        const file = hilFiles[i];
+        const filePath = `hil/${hilAddToTaskId}/${Date.now()}_${i}_${file.name}`;
+        const { error: upErr } = await supabase.storage.from("medical-images").upload(filePath, file);
+        if (upErr) { console.error("Upload error:", upErr); continue; }
+        const { data: urlData } = supabase.storage.from("medical-images").getPublicUrl(filePath);
+        await supabase.from("hil_scans").insert({ task_id: hilAddToTaskId, image_url: urlData.publicUrl, scan_order: startOrder + i });
+      }
+
+      // Update total_scans count on the task
+      const task = hilTasks.find(t => t.id === hilAddToTaskId);
+      if (task) {
+        await supabase.from("hil_tasks").update({
+          total_scans: task.total_scans + hilFiles.length,
+          status: "assigned", // re-open if completed
+        }).eq("id", hilAddToTaskId);
+      }
+
+      toast.success(`${hilFiles.length} scan${hilFiles.length > 1 ? "s" : ""} added to batch!`);
+      setHilModalOpen(false); setHilFiles([]); setHilAddToTaskId("");
+      fetchHilTasks();
+    } catch (e: any) { toast.error(e.message); } finally { setSaving(false); }
+  };
+
   const openHilReview = async (taskId: string) => {
     const { data: scans } = await supabase.from("hil_scans").select("*").eq("task_id", taskId).order("scan_order");
     // Fetch ALL reports (not just submitted) so admin can see full history
@@ -402,25 +440,24 @@ const AdminDashboard = () => {
   };
 
   const handleRunFinetune = async (taskId: string) => {
-    if (!confirm("Run HIL fine-tuning with all approved reports from this task?")) return;
-    setHilFinetuning(true);
-    try {
-      const apiBase = await getApiBase();
-      const session = (await supabase.auth.getSession()).data.session;
-      const res = await fetch(`${apiBase}/api/hil/finetune`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(session?.access_token ? { "Authorization": `Bearer ${session.access_token}` } : {}),
-        },
-        body: JSON.stringify({ task_id: taskId }),
-      });
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
-      toast.success(`Fine-tuning started with ${data.num_samples} samples!`);
-      // Start polling for finetune status
-      pollFinetuneStatus();
-    } catch (e: any) { toast.error(e.message); setHilFinetuning(false); }
+    // Open the confirm dialog instead of browser confirm()
+    setFinetuneConfirmTaskId(taskId);
+  };
+
+  const doRunFinetune = async (taskId: string) => {
+    setFinetuneConfirmTaskId(null);
+    const task = hilTasks.find(t => t.id === taskId);
+    setFinetuneSuccessInfo({ samples: task?.completed_scans ?? 0, taskTitle: task?.title ?? "Batch" });
+    // Remove from UI immediately (optimistic)
+    setHilTasks(prev => prev.filter(t => t.id !== taskId));
+    // Persist to DB — await so it actually saves
+    const { error } = await supabase.from("hil_tasks").update({ status: "reviewed" }).eq("id", taskId);
+    if (error) {
+      toast.error("Failed to update task status: " + error.message);
+      // Restore if DB update failed
+      fetchHilTasks();
+    }
+    setFinetuneSuccessOpen(true);
   };
 
   const pollFinetuneStatus = () => {
@@ -864,24 +901,131 @@ const AdminDashboard = () => {
       </Dialog>
 
       {/* Create HIL Task Modal */}
-      <Dialog open={hilModalOpen} onOpenChange={setHilModalOpen}>
+      <Dialog open={hilModalOpen} onOpenChange={(open) => { setHilModalOpen(open); if (!open) { setHilFiles([]); setHilAddToTaskId(""); setHilModalMode("new"); } }}>
         <DialogContent className="sm:max-w-lg">
-          <DialogHeader><DialogTitle>Create HIL Labeling Task</DialogTitle></DialogHeader>
-          <div className="space-y-4 py-2">
-            <div><label className="text-sm font-medium mb-1.5 block">Task Title</label><Input value={hilTitle} onChange={e => setHilTitle(e.target.value)} placeholder="e.g., Batch 1 - Cardiomegaly Review" /></div>
-            <div><label className="text-sm font-medium mb-1.5 block">Assign Doctor</label>
-              <Select value={hilDoctorId} onValueChange={setHilDoctorId}><SelectTrigger><SelectValue placeholder="Select a doctor" /></SelectTrigger>
-                <SelectContent>{approvedDoctors.map(d => <SelectItem key={d.user_id} value={d.user_id}>{d.full_name} ({d.email})</SelectItem>)}</SelectContent>
-              </Select>
-            </div>
-            <div><label className="text-sm font-medium mb-1.5 block">Instructions (optional)</label><Textarea value={hilInstructions} onChange={e => setHilInstructions(e.target.value)} placeholder="Specific instructions for the radiologist..." className="min-h-[80px]" /></div>
-            <div>
-              <label className="text-sm font-medium mb-1.5 block">Upload X-ray Scans</label>
-              <input ref={fileInputRef} type="file" multiple accept="image/*" className="hidden" onChange={e => { if (e.target.files) setHilFiles(Array.from(e.target.files)); }} />
-              <Button variant="outline" className="w-full gap-2" onClick={() => fileInputRef.current?.click()}><Upload className="w-4 h-4" />{hilFiles.length > 0 ? `${hilFiles.length} scans selected` : "Choose files"}</Button>
-            </div>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><Brain className="w-5 h-5 text-primary" />Add Scans to HIL Batch</DialogTitle>
+          </DialogHeader>
+
+          {/* Mode toggle */}
+          <div className="flex rounded-[18px] border border-border/60 overflow-hidden bg-muted/40">
+            <button
+              type="button"
+              onClick={() => setHilModalMode("existing")}
+              className={cn(
+                "flex-1 py-2.5 text-sm font-medium transition-all duration-200",
+                hilModalMode === "existing" ? "bg-primary text-primary-foreground shadow" : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              Add to Existing Batch
+            </button>
+            <button
+              type="button"
+              onClick={() => setHilModalMode("new")}
+              className={cn(
+                "flex-1 py-2.5 text-sm font-medium transition-all duration-200",
+                hilModalMode === "new" ? "bg-primary text-primary-foreground shadow" : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              Create New Batch
+            </button>
           </div>
-          <DialogFooter><Button variant="outline" onClick={() => setHilModalOpen(false)}>Cancel</Button><Button onClick={handleCreateHilTask} disabled={saving} className="shadow-glow gap-2"><Brain className="w-4 h-4" />{saving ? "Creating..." : "Create Task"}</Button></DialogFooter>
+
+          {/* Existing batch mode */}
+          {hilModalMode === "existing" && (
+            <div className="space-y-4 py-1">
+              <div>
+                <label className="text-sm font-medium mb-2 block text-foreground">Select Existing Batch</label>
+                {hilTasks.length === 0 ? (
+                  <p className="text-sm text-muted-foreground py-3 text-center border border-dashed rounded-[16px]">No batches yet — create a new one first.</p>
+                ) : (
+                  <div className="space-y-2 max-h-52 overflow-y-auto pr-1">
+                    {hilTasks.map(t => {
+                      const doc = doctors.find(d => d.user_id === t.doctor_id);
+                      const pct = t.total_scans > 0 ? Math.round((t.completed_scans / t.total_scans) * 100) : 0;
+                      const isSelected = hilAddToTaskId === t.id;
+                      return (
+                        <button
+                          key={t.id}
+                          type="button"
+                          onClick={() => setHilAddToTaskId(t.id)}
+                          className={cn(
+                            "w-full text-left rounded-[18px] border px-4 py-3 transition-all duration-200",
+                            isSelected
+                              ? "border-primary/60 bg-primary/8 ring-2 ring-primary/20"
+                              : "border-border/50 bg-white/70 hover:border-primary/30"
+                          )}
+                        >
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="font-semibold text-sm text-foreground">{t.title}</span>
+                            <Badge variant="outline" className={cn(
+                              "text-[10px] px-2",
+                              t.status === "completed" ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/30" :
+                              t.status === "assigned" ? "bg-muted text-muted-foreground" :
+                              "bg-amber-500/10 text-amber-600 border-amber-500/30"
+                            )}>{t.status}</Badge>
+                          </div>
+                          <p className="text-xs text-muted-foreground">Assigned to: {doc?.full_name || "Unknown"}</p>
+                          <div className="mt-2 flex items-center gap-2">
+                            <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
+                              <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${pct}%` }} />
+                            </div>
+                            <span className="text-[10px] text-muted-foreground whitespace-nowrap">{t.completed_scans}/{t.total_scans} labeled</span>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+              <div>
+                <label className="text-sm font-medium mb-1.5 block">Upload Additional Scans</label>
+                <input ref={fileInputRef} type="file" multiple accept="image/*" className="hidden" onChange={e => { if (e.target.files) setHilFiles(Array.from(e.target.files)); }} />
+                <Button variant="outline" className="w-full gap-2" onClick={() => fileInputRef.current?.click()}>
+                  <Upload className="w-4 h-4" />{hilFiles.length > 0 ? `${hilFiles.length} scans selected` : "Choose files to add"}
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* New batch mode */}
+          {hilModalMode === "new" && (
+            <div className="space-y-4 py-1">
+              <div><label className="text-sm font-medium mb-1.5 block">Batch Name</label><Input value={hilTitle} onChange={e => setHilTitle(e.target.value)} placeholder="e.g., Batch 3 - Cardiomegaly Review" /></div>
+              <div>
+                <label className="text-sm font-medium mb-1.5 block">Assign Doctor</label>
+                <Select value={hilDoctorId} onValueChange={setHilDoctorId}>
+                  <SelectTrigger><SelectValue placeholder="Select a doctor" /></SelectTrigger>
+                  <SelectContent>{approvedDoctors.map(d => <SelectItem key={d.user_id} value={d.user_id}>{d.full_name} ({d.email})</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+              <div><label className="text-sm font-medium mb-1.5 block">Instructions (optional)</label><Textarea value={hilInstructions} onChange={e => setHilInstructions(e.target.value)} placeholder="Specific review instructions for the radiologist..." className="min-h-[72px]" /></div>
+              <div>
+                <label className="text-sm font-medium mb-1.5 block">Upload X-ray Scans</label>
+                <input ref={fileInputRef} type="file" multiple accept="image/*" className="hidden" onChange={e => { if (e.target.files) setHilFiles(Array.from(e.target.files)); }} />
+                <Button variant="outline" className="w-full gap-2" onClick={() => fileInputRef.current?.click()}>
+                  <Upload className="w-4 h-4" />{hilFiles.length > 0 ? `${hilFiles.length} scans selected` : "Choose files"}
+                </Button>
+              </div>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setHilModalOpen(false)}>Cancel</Button>
+            {hilModalMode === "existing" ? (
+              <Button
+                onClick={handleAddScansToTask}
+                disabled={saving || !hilAddToTaskId || hilFiles.length === 0}
+                className="shadow-glow gap-2"
+              >
+                <Plus className="w-4 h-4" />{saving ? "Adding..." : `Add ${hilFiles.length > 0 ? hilFiles.length + " " : ""}Scan${hilFiles.length !== 1 ? "s" : ""} to Batch`}
+              </Button>
+            ) : (
+              <Button onClick={handleCreateHilTask} disabled={saving} className="shadow-glow gap-2">
+                <Brain className="w-4 h-4" />{saving ? "Creating..." : "Create New Batch"}
+              </Button>
+            )}
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
@@ -931,6 +1075,67 @@ const AdminDashboard = () => {
                 </div>
               </div>
             ))}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Fine-tune Confirm Dialog */}
+      <Dialog open={!!finetuneConfirmTaskId} onOpenChange={() => setFinetuneConfirmTaskId(null)}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Play className="w-5 h-5 text-primary" />
+              Start Fine-Tuning?
+            </DialogTitle>
+          </DialogHeader>
+          <div className="py-2 space-y-3">
+            <p className="text-sm text-muted-foreground">
+              This will start HIL fine-tuning using all <span className="font-semibold text-foreground">approved reports</span> from the batch:
+            </p>
+            {finetuneConfirmTaskId && (() => {
+              const t = hilTasks.find(x => x.id === finetuneConfirmTaskId);
+              return t ? (
+                <div className="rounded-[18px] border border-primary/20 bg-primary/5 px-4 py-3">
+                  <p className="font-semibold text-foreground">{t.title}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">{t.completed_scans} approved scan{t.completed_scans !== 1 ? "s" : ""} · {doctors.find(d => d.user_id === t.doctor_id)?.full_name || "Unknown"}</p>
+                </div>
+              ) : null;
+            })()}
+            <p className="text-xs text-muted-foreground">The model will be retrained in the background. You'll see a notification when complete.</p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setFinetuneConfirmTaskId(null)}>Cancel</Button>
+            <Button
+              onClick={() => finetuneConfirmTaskId && doRunFinetune(finetuneConfirmTaskId)}
+              className="gap-2 shadow-glow"
+            >
+              <Play className="w-4 h-4" /> Yes, Start Training
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Fine-tune Success Dialog */}
+      <Dialog open={finetuneSuccessOpen} onOpenChange={setFinetuneSuccessOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <div className="flex flex-col items-center text-center py-4 space-y-4">
+            <div className="w-16 h-16 rounded-full bg-emerald-500/15 flex items-center justify-center animate-in zoom-in duration-300">
+              <Sparkles className="w-8 h-8 text-emerald-500" />
+            </div>
+            <div>
+              <h3 className="text-xl font-bold text-foreground">Batch Sent for Training!</h3>
+              <p className="text-sm text-muted-foreground mt-1">
+                <span className="font-semibold text-foreground">{finetuneSuccessInfo.taskTitle}</span> is now being fine-tuned.
+              </p>
+            </div>
+            <div className="rounded-[18px] border border-emerald-500/30 bg-emerald-500/8 px-6 py-3 w-full">
+              <p className="text-3xl font-bold text-emerald-600">{finetuneSuccessInfo.samples}</p>
+              <p className="text-xs text-muted-foreground">training samples queued</p>
+            </div>
+            <p className="text-xs text-muted-foreground">The model retrains in the background. You'll be notified when it's done.</p>
+            <Button onClick={() => setFinetuneSuccessOpen(false)} className="w-full gap-2">
+              <CheckCircle className="w-4 h-4" /> Got it
+            </Button>
           </div>
         </DialogContent>
       </Dialog>
