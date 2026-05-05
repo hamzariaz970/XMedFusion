@@ -11,7 +11,7 @@ import { FileSearch, Info, Activity, Sparkles } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 
 import { useAnalysis } from "@/context/AnalysisContext";
-import { getApiBase } from "@/lib/apiConfig";
+import { getApiBase, getNgrokHeaders } from "@/lib/apiConfig";
 
 const ExplainabilityModule = () => {
   const navigate = useNavigate();
@@ -45,7 +45,7 @@ const ExplainabilityModule = () => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-
+          ...getNgrokHeaders(API_BASE_URL),
         },
         body: JSON.stringify({
           findings,

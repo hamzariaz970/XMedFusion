@@ -9,6 +9,24 @@ const LOOPBACK_URL = "http://127.0.0.1:8000";
 
 let cachedBaseUrl: string | null = null;
 
+/** Returns true when the cached/selected URL is the ngrok tunnel. */
+export const isNgrokUrl = (url: string) =>
+  url.includes("ngrok") || url.includes("ngrok-free");
+
+/**
+ * Returns headers required to bypass ngrok's browser interstitial page.
+ * Without these, ngrok returns its own HTML (HTTP 200, no CORS headers)
+ * instead of forwarding the request to FastAPI.
+ * Should be included on ALL fetch calls when using a ngrok URL.
+ */
+export const getNgrokHeaders = (baseUrl?: string): Record<string, string> => {
+  const url = baseUrl ?? cachedBaseUrl ?? "";
+  if (isNgrokUrl(url)) {
+    return { "ngrok-skip-browser-warning": "true" };
+  }
+  return {};
+};
+
 const getCandidateBaseUrls = () => {
   const candidates = [cachedBaseUrl, NGROK_URL, LOCAL_URL, LOOPBACK_URL]
     .filter(Boolean)
@@ -17,24 +35,33 @@ const getCandidateBaseUrls = () => {
   return Array.from(new Set(candidates));
 };
 
+/**
+ * Probes whether an API base URL is reachable.
+ *
+ * Uses `no-cors` mode so the browser doesn't block the OPTIONS preflight,
+ * which lets us detect connectivity. The real CORS check is enforced by the
+ * backend on all subsequent credentialed requests (FastAPI CORSMiddleware).
+ */
 const canReachApi = async (baseUrl: string, timeoutMs = 2500) => {
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
-    // Using query param instead of header avoids CORS preflight OPTIONS requests 
-    // which Ngrok sometimes blocks on free accounts.
+    // Query param + header together: the query param skips the browser
+    // warning page for GET requests; the header ensures ngrok forwards
+    // the request to FastAPI instead of returning its own interstitial.
     const url = `${baseUrl}/api/health?ngrok-skip-browser-warning=1`;
-    
+
     const response = await fetch(url, {
       method: "GET",
       signal: controller.signal,
-      mode: "no-cors", // Bypasses CORS blocks for the reachability check
+      mode: "no-cors", // Intentional: we only care about reachability here
+      headers: getNgrokHeaders(baseUrl),
     });
 
     clearTimeout(timeoutId);
-    // In no-cors mode, status is 0. If we got here without an exception, it means 
-    // the server responded (even if it was a CORS-restricted response).
+    // In no-cors mode the response type is "opaque" (status=0).
+    // If we didn't throw, the server is reachable.
     return response.type === "opaque" || response.ok;
   } catch (err) {
     console.warn(`Connection to ${baseUrl} failed:`, err);
@@ -49,7 +76,7 @@ export const getApiBase = async (forceRefresh = false): Promise<string> => {
 
   const candidates = getCandidateBaseUrls();
   console.log("🔍 API Discovery - Candidates:", candidates);
-  
+
   if (!NGROK_URL) {
     console.warn("⚠️ VITE_API_BASE_URL is missing from environment variables!");
   }
@@ -57,7 +84,7 @@ export const getApiBase = async (forceRefresh = false): Promise<string> => {
   for (const candidateUrl of candidates) {
     console.log(`Testing connectivity to: ${candidateUrl}...`);
     if (await canReachApi(candidateUrl)) {
-      if (candidateUrl === NGROK_URL) {
+      if (isNgrokUrl(candidateUrl)) {
         console.log("🚀 SUCCESS: Using Remote Ngrok API:", candidateUrl);
       } else {
         console.log("🏠 SUCCESS: Using Local API:", candidateUrl);
@@ -73,7 +100,8 @@ export const getApiBase = async (forceRefresh = false): Promise<string> => {
 };
 
 /**
- * Helper to get the base URL synchronously if already cached, 
- * otherwise returns local as a safe default while the check happens.
+ * Helper to get the base URL synchronously if already cached,
+ * otherwise returns local as a safe default while the async check happens.
  */
 export const getApiBaseSync = () => cachedBaseUrl || LOCAL_URL;
+

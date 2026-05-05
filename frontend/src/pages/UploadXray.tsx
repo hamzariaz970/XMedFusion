@@ -45,7 +45,7 @@ import FeedbackPanel from "@/components/FeedbackPanel";
 import KnowledgeGraph from "@/components/KnowledgeGraph";
 import { supabase } from "@/lib/supabaseClient";
 import { toast } from "sonner";
-import { getApiBase } from "@/lib/apiConfig";
+import { getApiBase, getNgrokHeaders } from "@/lib/apiConfig";
 
 type ProcessingStep = 'idle' | 'uploading' | 'analyzing' | 'complete';
 type ScanType = 'auto' | 'xray' | 'ct';
@@ -141,6 +141,7 @@ const fetchExplainabilityNarrative = async (
     method: "POST",
     headers: {
       "Content-Type": "application/json",
+      ...getNgrokHeaders(API_BASE_URL),
     },
     body: JSON.stringify({
       findings,
@@ -172,6 +173,7 @@ const validateUploadBatch = async (
 
   const response = await fetch(`${API_BASE_URL}/api/validate-upload-batch?ngrok-skip-browser-warning=1`, {
     method: "POST",
+    headers: getNgrokHeaders(API_BASE_URL),
     body: formData,
   });
 
@@ -303,8 +305,8 @@ const UploadXray = () => {
       const API_BASE_URL = await getApiBase();
       const response = await fetch(`${API_BASE_URL}/api/synthesize-report?ngrok-skip-browser-warning=1`, {
         method: "POST",
+        headers: getNgrokHeaders(API_BASE_URL),
         body: formData,
-
       });
 
       if (!response.ok) throw new Error("Synthesis failed");

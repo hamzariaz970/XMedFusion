@@ -254,12 +254,28 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
+# Allowed origins: wildcard "*" with allow_credentials=True is invalid per the CORS spec.
+# Enumerate trusted origins so auth headers/cookies work from Vercel.
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:3000",
+    # Vercel production deployment
+    "https://x-med-fusion-8uf7.vercel.app",
+]
+_extra_origins = os.getenv("EXTRA_CORS_ORIGINS", "").strip()
+if _extra_origins:
+    CORS_ALLOWED_ORIGINS += [o.strip() for o in _extra_origins.split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=CORS_ALLOWED_ORIGINS,
+    allow_origin_regex=r"https://.*\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
-    allow_headers=["*"],
+    allow_headers=["*", "ngrok-skip-browser-warning"],
+    expose_headers=["*"],
 )
 
 UPLOAD_DIR = "uploads"

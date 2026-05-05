@@ -16,7 +16,7 @@ import { cn } from "@/lib/utils";
 import { supabase } from "@/lib/supabaseClient";
 import { toast } from "sonner";
 import { useAuth } from "@/context/AuthContext";
-import { getApiBase } from "@/lib/apiConfig";
+import { getApiBase, getNgrokHeaders } from "@/lib/apiConfig";
 
 interface Doctor { id: string; user_id: string; full_name: string; email: string; specialization: string; status: string; created_at: string; }
 interface UserRole { id: string; user_id: string; role: string; approval_status: string; created_at: string; }
@@ -152,7 +152,7 @@ const AdminDashboard = () => {
   const fetchHealth = useCallback(async () => {
     try {
       const API_BASE_URL = await getApiBase(true);
-      const res = await fetch(`${API_BASE_URL}/api/health?ngrok-skip-browser-warning=1`, { signal: AbortSignal.timeout(3000) });
+      const res = await fetch(`${API_BASE_URL}/api/health?ngrok-skip-browser-warning=1`, { signal: AbortSignal.timeout(3000), headers: getNgrokHeaders(API_BASE_URL) });
       if (res.ok) {
         setHealth(await res.json());
         setHealthError(false);
@@ -464,7 +464,7 @@ const AdminDashboard = () => {
     const interval = setInterval(async () => {
       try {
         const apiBase = await getApiBase();
-        const res = await fetch(`${apiBase}/api/hil/finetune-status?ngrok-skip-browser-warning=1`);
+        const res = await fetch(`${apiBase}/api/hil/finetune-status?ngrok-skip-browser-warning=1`, { headers: getNgrokHeaders(apiBase) });
         const data = await res.json();
         if (!data.running) {
           clearInterval(interval);
