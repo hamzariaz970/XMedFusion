@@ -22,17 +22,19 @@ const canReachApi = async (baseUrl: string, timeoutMs = 2500) => {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
-    const response = await fetch(`${baseUrl}/api/health`, {
+    // Using query param instead of header avoids CORS preflight OPTIONS requests 
+    // which Ngrok sometimes blocks on free accounts.
+    const url = `${baseUrl}/api/health?ngrok-skip-browser-warning=1`;
+    
+    const response = await fetch(url, {
       method: "GET",
       signal: controller.signal,
-      headers: {
-        "ngrok-skip-browser-warning": "true",
-      },
     });
 
     clearTimeout(timeoutId);
     return response.ok;
-  } catch {
+  } catch (err) {
+    console.warn(`Connection to ${baseUrl} failed:`, err);
     return false;
   }
 };

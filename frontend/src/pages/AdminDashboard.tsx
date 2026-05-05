@@ -152,7 +152,7 @@ const AdminDashboard = () => {
   const fetchHealth = useCallback(async () => {
     try {
       const API_BASE_URL = await getApiBase(true);
-      const res = await fetch(`${API_BASE_URL}/api/health`, { signal: AbortSignal.timeout(3000), headers: { "ngrok-skip-browser-warning": "true" } });
+      const res = await fetch(`${API_BASE_URL}/api/health?ngrok-skip-browser-warning=1`, { signal: AbortSignal.timeout(3000) });
       if (res.ok) {
         setHealth(await res.json());
         setHealthError(false);
@@ -464,9 +464,7 @@ const AdminDashboard = () => {
     const interval = setInterval(async () => {
       try {
         const apiBase = await getApiBase();
-        const res = await fetch(`${apiBase}/api/hil/finetune-status`, {
-          headers: { "ngrok-skip-browser-warning": "true" },
-        });
+        const res = await fetch(`${apiBase}/api/hil/finetune-status?ngrok-skip-browser-warning=1`);
         const data = await res.json();
         if (!data.running) {
           clearInterval(interval);

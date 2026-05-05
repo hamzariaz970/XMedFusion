@@ -41,11 +41,11 @@ const ExplainabilityModule = () => {
       if (!findings || !impression) return null;
 
       const API_BASE_URL = await getApiBase();
-      const response = await fetch(`${API_BASE_URL}/api/explain`, {
+      const response = await fetch(`${API_BASE_URL}/api/explain?ngrok-skip-browser-warning=1`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'ngrok-skip-browser-warning': 'true',
+
         },
         body: JSON.stringify({
           findings,

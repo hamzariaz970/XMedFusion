@@ -137,11 +137,10 @@ const fetchExplainabilityNarrative = async (
   modality: string | null,
 ) => {
   const API_BASE_URL = await getApiBase();
-  const response = await fetch(`${API_BASE_URL}/api/explain`, {
+  const response = await fetch(`${API_BASE_URL}/api/explain?ngrok-skip-browser-warning=1`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "ngrok-skip-browser-warning": "true",
     },
     body: JSON.stringify({
       findings,
@@ -171,10 +170,9 @@ const validateUploadBatch = async (
   files.forEach((file) => formData.append("files", file));
   formData.append("scan_type", scanType);
 
-  const response = await fetch(`${API_BASE_URL}/api/validate-upload-batch`, {
+  const response = await fetch(`${API_BASE_URL}/api/validate-upload-batch?ngrok-skip-browser-warning=1`, {
     method: "POST",
     body: formData,
-    headers: { "ngrok-skip-browser-warning": "true" },
   });
 
   if (!response.ok) {
@@ -303,10 +301,10 @@ const UploadXray = () => {
     try {
       setCurrentStep('analyzing');
       const API_BASE_URL = await getApiBase();
-      const response = await fetch(`${API_BASE_URL}/api/synthesize-report`, {
+      const response = await fetch(`${API_BASE_URL}/api/synthesize-report?ngrok-skip-browser-warning=1`, {
         method: "POST",
         body: formData,
-        headers: { "ngrok-skip-browser-warning": "true" }
+
       });
 
       if (!response.ok) throw new Error("Synthesis failed");
