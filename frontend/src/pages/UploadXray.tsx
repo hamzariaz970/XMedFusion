@@ -201,6 +201,7 @@ const UploadXray = () => {
     setFeedbackStatus,
     setAnalysisResults,
     setCurrentScanId,
+    setExplainabilityData,
     resetAnalysis
   } = useAnalysis();
 
@@ -399,19 +400,22 @@ const UploadXray = () => {
         const persistedScanType = data.detected_modality || (effectiveScanType === "auto" ? "unknown" : effectiveScanType);
         let explainabilityPayload = data.explainability || null;
 
-        try {
-          const automatedNarrative = await fetchExplainabilityNarrative(
-            parsedReport.findings,
-            parsedReport.impression,
-            data.detected_modality || null,
-          );
-          explainabilityPayload = {
-            ...(explainabilityPayload || {}),
-            automated_narrative: automatedNarrative,
-          };
-        } catch (explainError) {
-          console.error("Explainability Narrative Error:", explainError);
-        }
+        // Async fetch explanation without blocking
+        const fetchAndSetExplanation = async () => {
+          try {
+            const automatedNarrative = await fetchExplainabilityNarrative(
+              parsedReport.findings,
+              parsedReport.impression,
+              data.detected_modality || null,
+            );
+            setExplainabilityData({
+              ...(data.explainability || {}),
+              automated_narrative: automatedNarrative,
+            });
+          } catch (explainError) {
+            console.error("Explainability Narrative Error:", explainError);
+          }
+        };
 
         let insertedScanId: string | null = null;
         try {
@@ -581,6 +585,7 @@ const UploadXray = () => {
         setTempPreviews([]);
         setProgress(100);
         setCurrentStep('complete');
+        fetchAndSetExplanation();
       }
     } catch (error) {
       console.error("Error:", error);
@@ -1286,19 +1291,19 @@ const UploadXray = () => {
                   </div>
 
                   {/* HITL Feedback */}
-                  {feedbackStatus === 'none' && (
-                    <Button
-                      variant="outline"
-                      className="w-full gap-2 border-amber-500/30 text-amber-600 hover:bg-amber-500/10 hover:border-amber-500/50"
-                      onClick={() => setFeedbackStatus('reviewing')}
-                    >
-                      <UserCheck className="w-4 h-4" />
-                      Edit &amp; Review Report
-                    </Button>
-                  )}
-                  {(feedbackStatus === 'reviewing' || feedbackStatus === 'draft' || feedbackStatus === 'approved') && (
+
+
+
+
+
+
+
+
+
+
+
                     <FeedbackPanel onReAnalyze={handleReset} />
-                  )}
+
                 </>
               ) : (
                 <Card className={cn(

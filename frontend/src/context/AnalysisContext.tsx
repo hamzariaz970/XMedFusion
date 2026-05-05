@@ -22,6 +22,7 @@ interface AnalysisContextType {
   heatmapData: string | null;
   detectedModality: string | null;
   explainabilityData: any | null;
+  setExplainabilityData: (data: any) => void;
   currentScanId: string | null;
 
   // HITL Feedback
@@ -118,6 +119,7 @@ export const AnalysisProvider = ({ children }: { children: ReactNode }) => {
       heatmapData,
       detectedModality,
       explainabilityData,
+      setExplainabilityData,
       currentScanId,
       feedbackStatus,
       setFeedbackStatus,

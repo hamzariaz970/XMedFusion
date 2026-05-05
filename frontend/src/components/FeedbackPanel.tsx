@@ -290,7 +290,28 @@ const FeedbackPanel = ({ onReAnalyze }: FeedbackPanelProps) => {
       </CardHeader>
 
       <CardContent className="space-y-4">
-        {/* ── Report Text Sections ─────────── */}
+        {feedbackStatus === 'none' ? (
+          <div className="flex flex-col sm:flex-row gap-3 pt-2">
+            <Button
+              variant="outline"
+              className="flex-1 gap-2 border-amber-500/30 text-amber-600 hover:bg-amber-500/10 hover:border-amber-500/50"
+              onClick={() => setFeedbackStatus('reviewing')}
+            >
+              <UserCheck className="w-4 h-4" />
+              Edit &amp; Review Report
+            </Button>
+            <Button
+              onClick={() => handleSave("approved")}
+              disabled={saving}
+              className="flex-1 gap-2 shadow-glow"
+            >
+              <CheckCircle className="w-4 h-4" />
+              {saving ? "Saving..." : "Approve as Final"}
+            </Button>
+          </div>
+        ) : (
+          <>
+            {/* ── Report Text Sections ─────────── */}
         <FeedbackSection
           id="report"
           icon={Brain}
@@ -475,6 +496,8 @@ const FeedbackPanel = ({ onReAnalyze }: FeedbackPanelProps) => {
             </Button>
           )}
         </div>
+          </>
+        )}
       </CardContent>
     </Card>
   );
