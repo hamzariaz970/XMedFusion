@@ -29,10 +29,13 @@ const canReachApi = async (baseUrl: string, timeoutMs = 2500) => {
     const response = await fetch(url, {
       method: "GET",
       signal: controller.signal,
+      mode: "no-cors", // Bypasses CORS blocks for the reachability check
     });
 
     clearTimeout(timeoutId);
-    return response.ok;
+    // In no-cors mode, status is 0. If we got here without an exception, it means 
+    // the server responded (even if it was a CORS-restricted response).
+    return response.type === "opaque" || response.ok;
   } catch (err) {
     console.warn(`Connection to ${baseUrl} failed:`, err);
     return false;
