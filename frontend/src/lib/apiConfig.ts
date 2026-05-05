@@ -42,20 +42,28 @@ export const getApiBase = async (forceRefresh = false): Promise<string> => {
     return cachedBaseUrl;
   }
 
-  for (const candidateUrl of getCandidateBaseUrls()) {
+  const candidates = getCandidateBaseUrls();
+  console.log("🔍 API Discovery - Candidates:", candidates);
+  
+  if (!NGROK_URL) {
+    console.warn("⚠️ VITE_API_BASE_URL is missing from environment variables!");
+  }
+
+  for (const candidateUrl of candidates) {
+    console.log(`Testing connectivity to: ${candidateUrl}...`);
     if (await canReachApi(candidateUrl)) {
       if (candidateUrl === NGROK_URL) {
-        console.log("🚀 Using Ngrok API:", candidateUrl);
+        console.log("🚀 SUCCESS: Using Remote Ngrok API:", candidateUrl);
       } else {
-        console.log("🏠 Using Local API:", candidateUrl);
+        console.log("🏠 SUCCESS: Using Local API:", candidateUrl);
       }
       cachedBaseUrl = candidateUrl;
       return candidateUrl;
     }
   }
 
+  console.error("❌ FAILURE: No reachable API found. Falling back to default:", LOCAL_URL);
   cachedBaseUrl = LOCAL_URL;
-  console.log("🏠 Using Local API:", LOCAL_URL);
   return LOCAL_URL;
 };
 
