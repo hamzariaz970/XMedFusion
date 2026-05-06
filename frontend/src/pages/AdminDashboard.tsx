@@ -252,7 +252,7 @@ const AdminDashboard = () => {
   const fetchHealth = useCallback(async () => {
     try {
       const API_BASE_URL = await getApiBase(true);
-      const res = await fetch(`${API_BASE_URL}/api/health?ngrok-skip-browser-warning=1`, { signal: AbortSignal.timeout(3000), headers: getNgrokHeaders(API_BASE_URL) });
+      const res = await fetch(`${API_BASE_URL}/api/health?ngrok-skip-browser-warning=1`, { signal: AbortSignal.timeout(10000), headers: getNgrokHeaders(API_BASE_URL) });
       if (res.ok) {
         setHealth(await res.json());
         setHealthError(false);

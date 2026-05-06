@@ -52,7 +52,7 @@ const getCandidateBaseUrls = () => {
  * A generic reachable page is not enough here: stopped ngrok tunnels can still
  * return HTML/error pages that would break upload requests later.
  */
-const canReachApi = async (baseUrl: string, timeoutMs = 2500) => {
+const canReachApi = async (baseUrl: string, timeoutMs = isNgrokUrl(baseUrl) ? 8000 : 2500) => {
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
