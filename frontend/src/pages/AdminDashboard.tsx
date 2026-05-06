@@ -11,7 +11,7 @@ import { radiologyImages } from "@/assets/radiology";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Users, Search, Activity, Plus, UserCog, Stethoscope, FileText, Server, Cpu, HardDrive, Clock, Trash2, Pencil, ShieldCheck, ShieldOff, Wifi, WifiOff, Zap, CheckCircle, XCircle, Crown, Brain, Upload, Eye, MessageSquare, Play, Sparkles } from "lucide-react";
+import { Users, Search, Activity, Plus, UserCog, Stethoscope, FileText, Server, Cpu, HardDrive, Clock, Trash2, Pencil, ShieldCheck, ShieldOff, Wifi, WifiOff, Zap, CheckCircle, XCircle, Crown, Brain, Upload, Eye, MessageSquare, Play, Sparkles, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/lib/supabaseClient";
 import { toast } from "sonner";
@@ -22,7 +22,7 @@ interface Doctor { id: string; user_id: string; full_name: string; email: string
 interface UserRole { id: string; user_id: string; role: string; approval_status: string; created_at: string; }
 interface PendingRequest { doctor: Doctor; role: UserRole; }
 interface HealthData { status: string; uptime_seconds: number; cpu_percent: number; memory_used_mb: number; memory_total_mb: number; gpu_available: boolean; gpu_name?: string; gpu_memory_used_mb?: number; gpu_memory_total_mb?: number; }
-interface HILTask { id: string; admin_id: string; doctor_id: string; title: string; instructions: string; total_scans: number; completed_scans: number; status: string; created_at: string; }
+interface HILTask { id: string; admin_id: string; doctor_id: string; title: string; instructions: string; total_scans: number; completed_scans: number; approved_scans?: number; status: string; created_at: string; }
 interface HILReport { id: string; scan_id: string; task_id: string; doctor_id: string; indication: string; comparison: string; findings: string; impression: string; admin_feedback: string; status: string; }
 interface HILScan { id: string; task_id: string; image_url: string; scan_order: number; status: string; }
 interface FeedbackDoctor {
@@ -32,10 +32,18 @@ interface FeedbackDoctor {
 }
 interface FeedbackScanMeta {
   id: string;
+  patient_id?: string | null;
+  scan_type?: string | null;
   original_image_url: string | null;
   source_images?: { url: string; filename?: string; order?: number }[] | null;
   heatmap_image_url?: string | null;
   explainability_reference_image_url?: string | null;
+  created_at?: string | null;
+}
+interface FeedbackPatientMeta {
+  id: string;
+  age: number | null;
+  gender: string | null;
 }
 interface ClinicalFeedbackRow {
   id: string;
@@ -48,9 +56,64 @@ interface ClinicalFeedbackRow {
   status: string;
   doctor?: FeedbackDoctor | null;
   scan?: FeedbackScanMeta | null;
+  patient?: FeedbackPatientMeta | null;
+  batchItem?: HILFeedbackBatchItem | null;
+}
+interface HILFeedbackBatch {
+  id: string;
+  admin_id: string | null;
+  title: string;
+  instructions: string | null;
+  model_target: string;
+  status: string;
+  queued_job_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+interface HILFeedbackBatchItem {
+  id: string;
+  batch_id: string;
+  feedback_id: string | null;
+  scan_id: string | null;
+  doctor_id: string | null;
+  source_type?: "feedback" | "hil_report";
+  hil_report_id?: string | null;
+  hil_scan_id?: string | null;
+  item_order: number;
+  include_original_report: boolean;
+  anonymize_patient: boolean;
+  created_at: string;
+  updated_at: string;
+}
+interface HILTrainingJob {
+  id: string;
+  batch_id: string | null;
+  status: string;
+  sample_count: number;
+  error: string | null;
+  result: Record<string, unknown> | null;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+}
+interface LegacyHilBatchReportMeta {
+  id: string;
+  task_id: string;
+  doctor_id: string;
+  findings: string;
+  impression: string;
+  status: string;
+  scan_id: string;
+}
+interface LegacyHilBatchScanMeta {
+  id: string;
+  task_id: string;
+  image_url: string;
+  scan_order: number;
 }
 
 function formatUptime(s: number) { const h = Math.floor(s/3600); const m = Math.floor((s%3600)/60); return h > 0 ? `${h}h ${m}m` : `${m}m`; }
+function getErrorMessage(error: unknown) { return error instanceof Error ? error.message : String(error || "Unexpected error"); }
 
 function getPreviewImageUrl(scan?: FeedbackScanMeta | null) {
   if (scan?.explainability_reference_image_url) {
@@ -75,6 +138,32 @@ function getPreviewImageUrl(scan?: FeedbackScanMeta | null) {
     .find(Boolean);
 
   return firstUrl || null;
+}
+
+function deriveHilTaskProgress(task: HILTask, reports: HILReport[]) {
+  const taskReports = reports.filter((report) => report.task_id === task.id);
+  const labeledScanIds = new Set(
+    taskReports
+      .filter((report) => report.status === "submitted" || report.status === "approved")
+      .map((report) => report.scan_id)
+  );
+  const approvedScanIds = new Set(
+    taskReports
+      .filter((report) => report.status === "approved")
+      .map((report) => report.scan_id)
+  );
+
+  let status = task.status;
+  if (labeledScanIds.size >= task.total_scans && task.total_scans > 0) status = "completed";
+  else if (labeledScanIds.size > 0) status = "in_progress";
+  else status = "assigned";
+
+  return {
+    ...task,
+    completed_scans: labeledScanIds.size,
+    approved_scans: approvedScanIds.size,
+    status,
+  };
 }
 
 const AdminDashboard = () => {
@@ -113,6 +202,17 @@ const AdminDashboard = () => {
   const [clinicalFeedback, setClinicalFeedback] = useState<ClinicalFeedbackRow[]>([]);
   const [selectedFeedbackIds, setSelectedFeedbackIds] = useState<Set<string>>(new Set());
   const [batchApproving, setBatchApproving] = useState(false);
+  const [hilFeedbackBatches, setHilFeedbackBatches] = useState<HILFeedbackBatch[]>([]);
+  const [hilFeedbackBatchItems, setHilFeedbackBatchItems] = useState<HILFeedbackBatchItem[]>([]);
+  const [hilTrainingJobs, setHilTrainingJobs] = useState<HILTrainingJob[]>([]);
+  const [legacyHilBatchReports, setLegacyHilBatchReports] = useState<LegacyHilBatchReportMeta[]>([]);
+  const [legacyHilBatchScans, setLegacyHilBatchScans] = useState<LegacyHilBatchScanMeta[]>([]);
+  const [selectedFeedbackBatchId, setSelectedFeedbackBatchId] = useState<string>("");
+  const [feedbackBatchModalOpen, setFeedbackBatchModalOpen] = useState(false);
+  const [editingFeedbackBatch, setEditingFeedbackBatch] = useState<HILFeedbackBatch | null>(null);
+  const [feedbackBatchTitle, setFeedbackBatchTitle] = useState("");
+  const [feedbackBatchInstructions, setFeedbackBatchInstructions] = useState("");
+  const [queueingFeedbackBatchId, setQueueingFeedbackBatchId] = useState<string | null>(null);
   const [finetuneConfirmTaskId, setFinetuneConfirmTaskId] = useState<string|null>(null);
   const [finetuneSuccessOpen, setFinetuneSuccessOpen] = useState(false);
   const [finetuneSuccessInfo, setFinetuneSuccessInfo] = useState<{samples:number;taskTitle:string}>({samples:0,taskTitle:""});
@@ -167,8 +267,20 @@ const AdminDashboard = () => {
   }, []);
 
   const fetchHilTasks = useCallback(async () => {
-    const { data } = await supabase.from("hil_tasks").select("*").neq("status", "reviewed").order("created_at", { ascending: false });
-    if (data) setHilTasks(data);
+    const { data: tasks } = await supabase.from("hil_tasks").select("*").neq("status", "reviewed").order("created_at", { ascending: false });
+    if (!tasks || tasks.length === 0) {
+      setHilTasks([]);
+      return;
+    }
+
+    const taskIds = tasks.map((task) => task.id);
+    const { data: reports } = await supabase
+      .from("hil_reports")
+      .select("id, scan_id, task_id, doctor_id, indication, comparison, findings, impression, admin_feedback, status")
+      .in("task_id", taskIds);
+
+    const derivedTasks = tasks.map((task) => deriveHilTaskProgress(task, reports || []));
+    setHilTasks(derivedTasks);
   }, []);
 
   const fetchClinicalFeedback = useCallback(async () => {
@@ -181,15 +293,27 @@ const AdminDashboard = () => {
     if (fbData && fbData.length > 0) {
       const scanIds = fbData.map((f) => f.scan_id).filter(Boolean);
       const doctorIds = fbData.map((f) => f.doctor_id).filter(Boolean);
+      const feedbackIds = fbData.map((f) => f.id);
       let scans: FeedbackScanMeta[] = [];
       let feedbackDoctors: FeedbackDoctor[] = [];
+      let patients: FeedbackPatientMeta[] = [];
+      let batchItems: HILFeedbackBatchItem[] = [];
 
       if (scanIds.length > 0) {
         const { data: scanData } = await supabase
           .from("medical_scans")
-          .select("id, original_image_url, source_images, heatmap_image_url, explainability_reference_image_url")
+          .select("id, patient_id, scan_type, original_image_url, source_images, heatmap_image_url, explainability_reference_image_url, created_at")
           .in("id", scanIds);
         if (scanData) scans = scanData;
+
+        const patientIds = scans.map((scan) => scan.patient_id).filter(Boolean) as string[];
+        if (patientIds.length > 0) {
+          const { data: patientData } = await supabase
+            .from("patients")
+            .select("id, age, gender")
+            .in("id", patientIds);
+          if (patientData) patients = patientData;
+        }
       }
 
       if (doctorIds.length > 0) {
@@ -200,10 +324,18 @@ const AdminDashboard = () => {
         if (doctorData) feedbackDoctors = doctorData;
       }
 
+      const { data: batchItemData } = await supabase
+        .from("hil_feedback_batch_items")
+        .select("*")
+        .in("feedback_id", feedbackIds);
+      if (batchItemData) batchItems = batchItemData;
+
       const merged: ClinicalFeedbackRow[] = fbData.map((f) => ({
         ...f,
         doctor: feedbackDoctors.find((doctor) => doctor.user_id === f.doctor_id) || null,
         scan: scans.find((scan) => scan.id === f.scan_id) || null,
+        patient: patients.find((patient) => patient.id === scans.find((scan) => scan.id === f.scan_id)?.patient_id) || null,
+        batchItem: batchItems.find((item) => item.feedback_id === f.id) || null,
       }));
       setClinicalFeedback(merged);
     } else {
@@ -211,8 +343,53 @@ const AdminDashboard = () => {
     }
   }, []);
 
+  const fetchHilFeedbackBatches = useCallback(async () => {
+    const [{ data: batches, error: batchError }, { data: items }, { data: jobs }] = await Promise.all([
+      supabase.from("hil_feedback_batches").select("*").order("created_at", { ascending: false }),
+      supabase.from("hil_feedback_batch_items").select("*").order("item_order", { ascending: true }),
+      supabase.from("hil_training_jobs").select("*").order("created_at", { ascending: false }).limit(20),
+    ]);
+
+    if (batchError) {
+      console.warn("HIL feedback batches unavailable:", batchError.message);
+      setHilFeedbackBatches([]);
+      setHilFeedbackBatchItems([]);
+      setHilTrainingJobs([]);
+      return;
+    }
+
+    setHilFeedbackBatches(batches || []);
+    setHilFeedbackBatchItems(items || []);
+    setHilTrainingJobs(jobs || []);
+
+    const hilReportIds = (items || []).map((item) => item.hil_report_id).filter(Boolean) as string[];
+    const hilScanIds = (items || []).map((item) => item.hil_scan_id).filter(Boolean) as string[];
+    if (hilReportIds.length > 0) {
+      const { data: legacyReports } = await supabase
+        .from("hil_reports")
+        .select("id, task_id, doctor_id, findings, impression, status, scan_id")
+        .in("id", hilReportIds);
+      setLegacyHilBatchReports(legacyReports || []);
+    } else {
+      setLegacyHilBatchReports([]);
+    }
+    if (hilScanIds.length > 0) {
+      const { data: legacyScans } = await supabase
+        .from("hil_scans")
+        .select("id, task_id, image_url, scan_order")
+        .in("id", hilScanIds);
+      setLegacyHilBatchScans(legacyScans || []);
+    } else {
+      setLegacyHilBatchScans([]);
+    }
+
+    if (!selectedFeedbackBatchId && batches && batches.length > 0) {
+      setSelectedFeedbackBatchId(batches[0].id);
+    }
+  }, [selectedFeedbackBatchId]);
+
   useEffect(() => {
-    fetchDoctors(); fetchPending(); fetchAdmins(); fetchCounts(); fetchHealth(); fetchHilTasks(); fetchClinicalFeedback();
+    fetchDoctors(); fetchPending(); fetchAdmins(); fetchCounts(); fetchHealth(); fetchHilTasks(); fetchHilFeedbackBatches(); fetchClinicalFeedback();
     const interval = setInterval(fetchHealth, 10000);
 
     // Real-time subscription: refresh clinical feedback whenever a doctor inserts/updates a feedback row
@@ -221,7 +398,7 @@ const AdminDashboard = () => {
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "feedback" },
-        () => { fetchClinicalFeedback(); }
+        () => { fetchClinicalFeedback(); fetchHilFeedbackBatches(); }
       )
       .subscribe();
 
@@ -229,7 +406,7 @@ const AdminDashboard = () => {
       clearInterval(interval);
       supabase.removeChannel(channel);
     };
-  }, [fetchDoctors, fetchPending, fetchAdmins, fetchCounts, fetchHealth, fetchHilTasks, fetchClinicalFeedback]);
+  }, [fetchDoctors, fetchPending, fetchAdmins, fetchCounts, fetchHealth, fetchHilTasks, fetchHilFeedbackBatches, fetchClinicalFeedback]);
 
   // Approve / Reject pending
   const handleApprove = async (req: PendingRequest) => {
@@ -263,7 +440,7 @@ const AdminDashboard = () => {
         toast.success("Doctor pre-approved. They will have instant access when they sign up.");
       }
       setModalOpen(false); fetchDoctors();
-    } catch (e: any) { toast.error(e.message); } finally { setSaving(false); }
+    } catch (e: unknown) { toast.error(getErrorMessage(e)); } finally { setSaving(false); }
   };
 
   const handleDelete = async (doc: Doctor) => {
@@ -291,7 +468,7 @@ const AdminDashboard = () => {
       if (error) throw error;
       toast.success(`${adminEmail} promoted to admin!`);
       setAdminModalOpen(false); setAdminEmail(""); fetchAdmins(); fetchPending();
-    } catch (e: any) { toast.error(e.message); } finally { setSaving(false); }
+    } catch (e: unknown) { toast.error(getErrorMessage(e)); } finally { setSaving(false); }
   };
 
   const filtered = doctors.filter(d => {
@@ -301,6 +478,17 @@ const AdminDashboard = () => {
   });
   const activeDoctors = doctors.filter(d => d.status === "active").length;
   const approvedDoctors = doctors.filter(d => d.status === "active" && d.user_id);
+  const selectedFeedbackBatch = hilFeedbackBatches.find((batch) => batch.id === selectedFeedbackBatchId) || null;
+  const selectedFeedbackBatchItems = hilFeedbackBatchItems
+    .filter((item) => item.batch_id === selectedFeedbackBatchId)
+    .sort((a, b) => a.item_order - b.item_order);
+  const availableClinicalFeedback = clinicalFeedback.filter((fb) => !fb.batchItem);
+
+  const getFeedbackById = (feedbackId: string) => clinicalFeedback.find((fb) => fb.id === feedbackId);
+  const getLegacyHilReportById = (reportId: string) => legacyHilBatchReports.find((report) => report.id === reportId);
+  const getLegacyHilScanById = (scanId: string) => legacyHilBatchScans.find((scan) => scan.id === scanId);
+  const getBatchItemCount = (batchId: string) => hilFeedbackBatchItems.filter((item) => item.batch_id === batchId).length;
+  const getBatchLatestJob = (batchId: string) => hilTrainingJobs.find((job) => job.batch_id === batchId);
 
   // HIL handlers
   const handleCreateHilTask = async () => {
@@ -323,7 +511,7 @@ const AdminDashboard = () => {
       toast.success(`Task created with ${hilFiles.length} scans!`);
       setHilModalOpen(false); setHilTitle(""); setHilInstructions(""); setHilDoctorId(""); setHilFiles([]);
       fetchHilTasks();
-    } catch (e: any) { toast.error(e.message); } finally { setSaving(false); }
+    } catch (e: unknown) { toast.error(getErrorMessage(e)); } finally { setSaving(false); }
   };
 
   const handleAddScansToTask = async () => {
@@ -356,7 +544,7 @@ const AdminDashboard = () => {
       toast.success(`${hilFiles.length} scan${hilFiles.length > 1 ? "s" : ""} added to batch!`);
       setHilModalOpen(false); setHilFiles([]); setHilAddToTaskId("");
       fetchHilTasks();
-    } catch (e: any) { toast.error(e.message); } finally { setSaving(false); }
+    } catch (e: unknown) { toast.error(getErrorMessage(e)); } finally { setSaving(false); }
   };
 
   const openHilReview = async (taskId: string) => {
@@ -368,6 +556,7 @@ const AdminDashboard = () => {
       setHilReviewScans(merged);
     }
     setHilReviewTaskId(taskId);
+    fetchHilTasks();
   };
 
   const handleApproveReport = async (reportId: string, scanId: string) => {
@@ -388,6 +577,57 @@ const AdminDashboard = () => {
     const { error } = await supabase.from("hil_tasks").delete().eq("id", taskId);
     if (error) toast.error(error.message);
     else { toast.success("Task deleted."); fetchHilTasks(); }
+  };
+
+  const handleAddApprovedHilReportToBatch = async (scan: HILScan & { report?: HILReport }) => {
+    if (!scan.report || scan.report.status !== "approved") {
+      toast.error("Approve the report before adding it to the Vision training pool.");
+      return;
+    }
+    if (!selectedFeedbackBatchId) {
+      toast.error("Select or create a Vision HIL batch first.");
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const existingItem = hilFeedbackBatchItems.find((item) => item.hil_report_id === scan.report?.id);
+      const itemOrder = getBatchItemCount(selectedFeedbackBatchId);
+      if (existingItem) {
+        const { error } = await supabase
+          .from("hil_feedback_batch_items")
+          .update({
+            batch_id: selectedFeedbackBatchId,
+            source_type: "hil_report",
+            hil_report_id: scan.report.id,
+            hil_scan_id: scan.id,
+            doctor_id: scan.report.doctor_id,
+            item_order: itemOrder,
+          })
+          .eq("id", existingItem.id);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from("hil_feedback_batch_items").insert({
+          batch_id: selectedFeedbackBatchId,
+          feedback_id: null,
+          scan_id: null,
+          doctor_id: scan.report.doctor_id,
+          source_type: "hil_report",
+          hil_report_id: scan.report.id,
+          hil_scan_id: scan.id,
+          item_order: itemOrder,
+          include_original_report: true,
+          anonymize_patient: true,
+        });
+        if (error) throw error;
+      }
+      toast.success("Approved HIL report added to Vision training batch.");
+      await fetchHilFeedbackBatches();
+    } catch (e: unknown) {
+      toast.error(getErrorMessage(e) || "Failed to add approved HIL report.");
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleApproveClinicalHIL = async (feedbackId: string) => {
@@ -426,16 +666,209 @@ const AdminDashboard = () => {
   const toggleFeedbackSelection = (id: string) => {
     setSelectedFeedbackIds(prev => {
       const n = new Set(prev);
-      n.has(id) ? n.delete(id) : n.add(id);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
       return n;
     });
   };
 
   const toggleSelectAll = () => {
-    if (selectedFeedbackIds.size === clinicalFeedback.length) {
+    if (selectedFeedbackIds.size === availableClinicalFeedback.length) {
       setSelectedFeedbackIds(new Set());
     } else {
-      setSelectedFeedbackIds(new Set(clinicalFeedback.map(fb => fb.id)));
+      setSelectedFeedbackIds(new Set(availableClinicalFeedback.map(fb => fb.id)));
+    }
+  };
+
+  const openCreateFeedbackBatch = () => {
+    setEditingFeedbackBatch(null);
+    setFeedbackBatchTitle("");
+    setFeedbackBatchInstructions("");
+    setFeedbackBatchModalOpen(true);
+  };
+
+  const openEditFeedbackBatch = (batch: HILFeedbackBatch) => {
+    setEditingFeedbackBatch(batch);
+    setFeedbackBatchTitle(batch.title);
+    setFeedbackBatchInstructions(batch.instructions || "");
+    setFeedbackBatchModalOpen(true);
+  };
+
+  const handleSaveFeedbackBatch = async () => {
+    if (!feedbackBatchTitle.trim()) {
+      toast.error("Batch name is required.");
+      return;
+    }
+    setSaving(true);
+    try {
+      if (editingFeedbackBatch) {
+        const { error } = await supabase
+          .from("hil_feedback_batches")
+          .update({ title: feedbackBatchTitle.trim(), instructions: feedbackBatchInstructions.trim() })
+          .eq("id", editingFeedbackBatch.id);
+        if (error) throw error;
+        toast.success("HIL batch updated.");
+      } else {
+        const { data: batch, error } = await supabase
+          .from("hil_feedback_batches")
+          .insert({
+            admin_id: user?.id,
+            title: feedbackBatchTitle.trim(),
+            instructions: feedbackBatchInstructions.trim(),
+            model_target: "vision_agent",
+            status: "draft",
+          })
+          .select()
+          .single();
+        if (error || !batch) throw error || new Error("Failed to create batch");
+        setSelectedFeedbackBatchId(batch.id);
+        if (selectedFeedbackIds.size > 0) {
+          await addFeedbackToBatch(batch.id, Array.from(selectedFeedbackIds));
+        }
+        toast.success("HIL batch created.");
+      }
+      setFeedbackBatchModalOpen(false);
+      setEditingFeedbackBatch(null);
+      setFeedbackBatchTitle("");
+      setFeedbackBatchInstructions("");
+      setSelectedFeedbackIds(new Set());
+      await fetchHilFeedbackBatches();
+      await fetchClinicalFeedback();
+    } catch (e: unknown) {
+      toast.error(getErrorMessage(e) || "Failed to save HIL batch.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const addFeedbackToBatch = async (batchId: string, feedbackIds: string[]) => {
+    if (!batchId || feedbackIds.length === 0) return;
+    const startOrder = getBatchItemCount(batchId);
+    for (let index = 0; index < feedbackIds.length; index++) {
+      const fb = getFeedbackById(feedbackIds[index]);
+      if (!fb) continue;
+      const existing = fb.batchItem || hilFeedbackBatchItems.find((item) => item.feedback_id === fb.id);
+      if (existing) {
+        const { error } = await supabase
+          .from("hil_feedback_batch_items")
+          .update({
+            batch_id: batchId,
+            scan_id: fb.scan_id,
+            doctor_id: fb.doctor_id,
+            item_order: startOrder + index,
+          })
+          .eq("id", existing.id);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from("hil_feedback_batch_items").insert({
+          batch_id: batchId,
+          feedback_id: fb.id,
+          scan_id: fb.scan_id,
+          doctor_id: fb.doctor_id,
+          item_order: startOrder + index,
+          include_original_report: true,
+          anonymize_patient: true,
+        });
+        if (error) throw error;
+      }
+    }
+  };
+
+  const handleAddSelectedToFeedbackBatch = async () => {
+    if (!selectedFeedbackBatchId || selectedFeedbackIds.size === 0) {
+      toast.error("Select a batch and at least one feedback example.");
+      return;
+    }
+    setSaving(true);
+    try {
+      await addFeedbackToBatch(selectedFeedbackBatchId, Array.from(selectedFeedbackIds));
+      toast.success(`${selectedFeedbackIds.size} example${selectedFeedbackIds.size === 1 ? "" : "s"} added to batch.`);
+      setSelectedFeedbackIds(new Set());
+      await fetchHilFeedbackBatches();
+      await fetchClinicalFeedback();
+    } catch (e: unknown) {
+      toast.error(getErrorMessage(e) || "Failed to add examples to batch.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleMoveBatchItem = async (itemId: string, batchId: string) => {
+    const { error } = await supabase
+      .from("hil_feedback_batch_items")
+      .update({ batch_id: batchId, item_order: getBatchItemCount(batchId) })
+      .eq("id", itemId);
+    if (error) toast.error(error.message);
+    else {
+      toast.success("Example moved.");
+      fetchHilFeedbackBatches();
+      fetchClinicalFeedback();
+    }
+  };
+
+  const handleRemoveBatchItem = async (itemId: string) => {
+    const { error } = await supabase.from("hil_feedback_batch_items").delete().eq("id", itemId);
+    if (error) toast.error(error.message);
+    else {
+      toast.success("Example returned to available pool.");
+      fetchHilFeedbackBatches();
+      fetchClinicalFeedback();
+    }
+  };
+
+  const handleDeleteFeedbackFromPool = async (feedbackId: string, itemId?: string) => {
+    if (!confirm("Remove this example from the HIL pool? This will exclude it from batching and training.")) return;
+    if (itemId) {
+      await supabase.from("hil_feedback_batch_items").delete().eq("id", itemId);
+    }
+    const { error } = await supabase.from("feedback").update({ status: "hil_removed" }).eq("id", feedbackId);
+    if (error) toast.error(error.message);
+    else {
+      toast.success("Example removed from HIL pool.");
+      setSelectedFeedbackIds(prev => { const n = new Set(prev); n.delete(feedbackId); return n; });
+      fetchHilFeedbackBatches();
+      fetchClinicalFeedback();
+    }
+  };
+
+  const handleDeleteFeedbackBatch = async (batchId: string) => {
+    if (!confirm("Delete this HIL batch? Its examples will return to the available pool.")) return;
+    const { error } = await supabase.from("hil_feedback_batches").delete().eq("id", batchId);
+    if (error) toast.error(error.message);
+    else {
+      toast.success("HIL batch deleted.");
+      if (selectedFeedbackBatchId === batchId) setSelectedFeedbackBatchId("");
+      fetchHilFeedbackBatches();
+      fetchClinicalFeedback();
+    }
+  };
+
+  const handleQueueFeedbackBatch = async (batchId: string) => {
+    const count = getBatchItemCount(batchId);
+    if (count < 3) {
+      toast.error("Use at least 3 examples for a light Vision Agent adaptation.");
+      return;
+    }
+    setQueueingFeedbackBatchId(batchId);
+    try {
+      const apiBase = await getApiBase();
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      const res = await fetch(`${apiBase}/api/hil/vision-finetune-batches/${batchId}/enqueue?ngrok-skip-browser-warning=1`, {
+        method: "POST",
+        headers: {
+          ...getNgrokHeaders(apiBase),
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || data.detail || "Failed to queue Vision fine-tuning.");
+      toast.success(`Vision fine-tuning queued with ${data.sample_count} sample${data.sample_count === 1 ? "" : "s"}.`);
+      await fetchHilFeedbackBatches();
+    } catch (e: unknown) {
+      toast.error(getErrorMessage(e) || "Failed to queue Vision fine-tuning.");
+    } finally {
+      setQueueingFeedbackBatchId(null);
     }
   };
 
@@ -447,17 +880,32 @@ const AdminDashboard = () => {
   const doRunFinetune = async (taskId: string) => {
     setFinetuneConfirmTaskId(null);
     const task = hilTasks.find(t => t.id === taskId);
-    setFinetuneSuccessInfo({ samples: task?.completed_scans ?? 0, taskTitle: task?.title ?? "Batch" });
-    // Remove from UI immediately (optimistic)
-    setHilTasks(prev => prev.filter(t => t.id !== taskId));
-    // Persist to DB — await so it actually saves
-    const { error } = await supabase.from("hil_tasks").update({ status: "reviewed" }).eq("id", taskId);
-    if (error) {
-      toast.error("Failed to update task status: " + error.message);
-      // Restore if DB update failed
+    setHilFinetuning(true);
+    try {
+      const apiBase = await getApiBase();
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      const res = await fetch(`${apiBase}/api/hil/finetune?ngrok-skip-browser-warning=1`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...getNgrokHeaders(apiBase),
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ task_id: taskId }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || data.detail || "Failed to start fine-tuning.");
+      await supabase.from("hil_tasks").update({ status: "reviewed" }).eq("id", taskId);
+      setFinetuneSuccessInfo({ samples: data.num_samples ?? task?.completed_scans ?? 0, taskTitle: task?.title ?? "Batch" });
+      setHilTasks(prev => prev.filter(t => t.id !== taskId));
+      setFinetuneSuccessOpen(true);
+      pollFinetuneStatus();
+    } catch (e: unknown) {
+      setHilFinetuning(false);
+      toast.error(getErrorMessage(e) || "Failed to start fine-tuning.");
       fetchHilTasks();
     }
-    setFinetuneSuccessOpen(true);
   };
 
   const pollFinetuneStatus = () => {
@@ -486,7 +934,7 @@ const AdminDashboard = () => {
     { id: "doctors" as const, label: "Doctor Registry", icon: Stethoscope },
     { id: "pending" as const, label: `Pending Requests (${pendingRequests.length})`, icon: Clock },
     { id: "admins" as const, label: "Admin Management", icon: Crown },
-    { id: "hil" as const, label: `HIL Feedback (${hilTasks.length})${clinicalFeedback.length > 0 ? ` · ${clinicalFeedback.length} pending` : ""}`, icon: Brain },
+    { id: "hil" as const, label: `HIL Feedback (${hilTasks.length})${availableClinicalFeedback.length > 0 ? ` · ${availableClinicalFeedback.length} available` : ""}`, icon: Brain },
   ];
 
   return (
@@ -672,13 +1120,13 @@ const AdminDashboard = () => {
                             </div>
                             <div className="flex gap-2 items-center">
                               <Button variant="outline" size="sm" className="gap-1" onClick={() => openHilReview(t.id)}><Eye className="w-3.5 h-3.5" />Review Reports</Button>
-                              {t.completed_scans >= 5 && t.status !== "reviewed" && (
+                              {(t.approved_scans ?? 0) >= 5 && t.status !== "reviewed" && (
                                 <Button size="sm" className="gap-1" onClick={() => handleRunFinetune(t.id)} disabled={hilFinetuning}>
                                   <Play className="w-3.5 h-3.5" />{hilFinetuning ? "Training..." : "Run Fine-tuning"}
                                 </Button>
                               )}
-                              {t.completed_scans > 0 && t.completed_scans < 5 && t.status !== "reviewed" && (
-                                <span className="text-xs text-muted-foreground">Need {5 - t.completed_scans} more approved to fine-tune</span>
+                              {((t.approved_scans ?? 0) > 0) && (t.approved_scans ?? 0) < 5 && t.status !== "reviewed" && (
+                                <span className="text-xs text-muted-foreground">Need {5 - (t.approved_scans ?? 0)} more approved to fine-tune</span>
                               )}
                               <Button variant="ghost" size="icon" className="ml-auto text-destructive/60 hover:text-destructive" onClick={() => handleDeleteTask(t.id)} title="Delete task">
                                 <Trash2 className="w-4 h-4" />
@@ -692,21 +1140,181 @@ const AdminDashboard = () => {
                 </CardContent>
               </Card>
 
+              {/* Clinical Feedback Batches */}
+              <Card className="surface-card mt-6">
+                <CardHeader>
+                  <div className="flex items-center justify-between flex-wrap gap-3">
+                    <CardTitle className="flex items-center gap-2">
+                      <Upload className="w-5 h-5 text-primary" />
+                      Vision Agent HIL Batches
+                    </CardTitle>
+                    <div className="flex gap-2">
+                      <Button variant="outline" size="sm" className="gap-1.5" onClick={fetchHilFeedbackBatches}>
+                        <Activity className="w-3.5 h-3.5" /> Refresh
+                      </Button>
+                      <Button size="sm" className="gap-1.5 shadow-glow" onClick={openCreateFeedbackBatch}>
+                        <Plus className="w-3.5 h-3.5" /> New Batch
+                      </Button>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  {hilFeedbackBatches.length === 0 ? (
+                    <div className="text-center py-8 text-muted-foreground">
+                      <Upload className="w-10 h-10 mx-auto mb-3 opacity-40" />
+                      <p>No clinical feedback batches yet.</p>
+                      <p className="text-xs mt-1 opacity-70">Select approved feedback below, then create a batch for Vision Agent fine-tuning.</p>
+                    </div>
+                  ) : (
+                    <div className="grid gap-4 lg:grid-cols-[280px_1fr]">
+                      <div className="space-y-2">
+                        {hilFeedbackBatches.map(batch => {
+                          const itemCount = getBatchItemCount(batch.id);
+                          const latestJob = getBatchLatestJob(batch.id);
+                          const selected = selectedFeedbackBatchId === batch.id;
+                          return (
+                            <button
+                              key={batch.id}
+                              type="button"
+                              onClick={() => setSelectedFeedbackBatchId(batch.id)}
+                              className={cn(
+                                "w-full rounded-[18px] border px-3 py-3 text-left transition-all",
+                                selected ? "border-primary/60 bg-primary/8 ring-2 ring-primary/20" : "border-border/50 bg-white/70 hover:border-primary/30"
+                              )}
+                            >
+                              <div className="flex items-start justify-between gap-2">
+                                <div>
+                                  <p className="text-sm font-semibold text-foreground">{batch.title}</p>
+                                  <p className="text-xs text-muted-foreground">{itemCount} example{itemCount === 1 ? "" : "s"}</p>
+                                </div>
+                                <Badge variant="outline" className="text-[10px]">{latestJob?.status || batch.status}</Badge>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      <div className="rounded-[22px] border border-border/50 bg-white/70 p-4">
+                        {selectedFeedbackBatch ? (
+                          <div className="space-y-4">
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <h4 className="font-semibold text-foreground">{selectedFeedbackBatch.title}</h4>
+                                <p className="text-xs text-muted-foreground">
+                                  {selectedFeedbackBatch.instructions || "No special instructions."}
+                                </p>
+                              </div>
+                              <div className="flex flex-wrap justify-end gap-2">
+                                <Button variant="outline" size="sm" onClick={() => openEditFeedbackBatch(selectedFeedbackBatch)}>
+                                  <Pencil className="w-3.5 h-3.5 mr-1" /> Edit
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  className="gap-1"
+                                  disabled={queueingFeedbackBatchId === selectedFeedbackBatch.id || selectedFeedbackBatchItems.length < 3}
+                                  onClick={() => handleQueueFeedbackBatch(selectedFeedbackBatch.id)}
+                                >
+                                  <Play className="w-3.5 h-3.5" />
+                                  {queueingFeedbackBatchId === selectedFeedbackBatch.id ? "Queueing..." : "Send to Vision Training"}
+                                </Button>
+                                <Button variant="ghost" size="icon" className="text-destructive/70 hover:text-destructive" onClick={() => handleDeleteFeedbackBatch(selectedFeedbackBatch.id)}>
+                                  <Trash2 className="w-4 h-4" />
+                                </Button>
+                              </div>
+                            </div>
+
+                            {selectedFeedbackBatchItems.length === 0 ? (
+                              <div className="rounded-[18px] border border-dashed border-border/70 p-6 text-center text-sm text-muted-foreground">
+                                No examples in this batch yet.
+                              </div>
+                            ) : (
+                              <div className="space-y-3">
+                                {selectedFeedbackBatchItems.map((item, index) => {
+                                  const isLegacyHilReport = item.source_type === "hil_report" && !!item.hil_report_id;
+                                  const fb = item.feedback_id ? getFeedbackById(item.feedback_id) : undefined;
+                                  const legacyReport = item.hil_report_id ? getLegacyHilReportById(item.hil_report_id) : undefined;
+                                  const legacyScan = item.hil_scan_id ? getLegacyHilScanById(item.hil_scan_id) : undefined;
+                                  if (!fb && !legacyReport) return null;
+                                  const previewImageUrl = fb ? getPreviewImageUrl(fb.scan) : legacyScan?.image_url || null;
+                                  return (
+                                    <div key={item.id} className="rounded-[18px] border border-border/50 bg-white p-3">
+                                      <div className="flex items-start justify-between gap-3">
+                                        <div className="flex gap-3">
+                                          <div className="text-xs font-semibold text-muted-foreground pt-1">#{index + 1}</div>
+                                          {previewImageUrl && <img src={previewImageUrl} alt="Scan" className="h-20 w-24 rounded-[12px] border bg-black/5 object-contain" />}
+                                          <div className="space-y-1">
+                                            {fb ? (
+                                              <>
+                                                <p className="text-sm font-semibold text-foreground">{fb.scan?.scan_type?.toUpperCase() || "SCAN"} · Anonymous patient {fb.scan?.patient_id?.slice(0, 8) || "unknown"}</p>
+                                                <p className="text-xs text-muted-foreground">
+                                                  Doctor: {fb.doctor?.full_name || fb.doctor?.email || "Unknown"} · Patient: {fb.patient?.age ? `${fb.patient.age}y` : "age N/A"} {fb.patient?.gender || ""}
+                                                </p>
+                                                <p className="line-clamp-2 text-xs text-foreground/80">{fb.edited_impression || fb.original_impression || "No impression provided."}</p>
+                                              </>
+                                            ) : (
+                                              <>
+                                                <p className="text-sm font-semibold text-foreground">Legacy HIL Report · Task {legacyReport?.task_id.slice(0, 8) || "unknown"}</p>
+                                                <p className="text-xs text-muted-foreground">
+                                                  Doctor: {doctors.find((doctor) => doctor.user_id === legacyReport?.doctor_id)?.full_name || "Unknown"} · Scan {legacyScan?.scan_order !== undefined ? `#${legacyScan.scan_order + 1}` : "unknown"}
+                                                </p>
+                                                <p className="line-clamp-2 text-xs text-foreground/80">{legacyReport?.impression || legacyReport?.findings || "No report text provided."}</p>
+                                              </>
+                                            )}
+                                          </div>
+                                        </div>
+                                        <div className="flex flex-col gap-2 min-w-44">
+                                          <Select value={item.batch_id} onValueChange={(batchId) => handleMoveBatchItem(item.id, batchId)}>
+                                            <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                                            <SelectContent>
+                                              {hilFeedbackBatches.map(batch => <SelectItem key={batch.id} value={batch.id}>{batch.title}</SelectItem>)}
+                                            </SelectContent>
+                                          </Select>
+                                          <div className="flex justify-end gap-1">
+                                            <Button variant="outline" size="sm" onClick={() => handleRemoveBatchItem(item.id)}>Remove</Button>
+                                            {fb && (
+                                              <Button variant="ghost" size="icon" className="text-destructive/70 hover:text-destructive" onClick={() => handleDeleteFeedbackFromPool(fb.id, item.id)}>
+                                                <Trash2 className="w-4 h-4" />
+                                              </Button>
+                                            )}
+                                          </div>
+                                        </div>
+                                      </div>
+                                      {isLegacyHilReport && legacyReport && (
+                                        <div className="mt-3 rounded-[12px] border border-border/50 bg-muted/30 p-2 text-xs text-foreground/80">
+                                          <p><span className="font-semibold text-muted-foreground">Findings:</span> {legacyReport.findings || "None"}</p>
+                                          <p className="mt-1"><span className="font-semibold text-muted-foreground">Impression:</span> {legacyReport.impression || "None"}</p>
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <p className="py-8 text-center text-sm text-muted-foreground">Select a batch to inspect examples.</p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
               {/* Pending Clinical Approvals */}
               <Card className="surface-card mt-6">
                 <CardHeader>
                   <div className="flex items-center justify-between flex-wrap gap-3">
                     <CardTitle className="flex items-center gap-2">
                       <CheckCircle className="w-5 h-5 text-emerald-500" />
-                      Pending Clinical Reports for HIL
-                      {clinicalFeedback.length > 0 && (
+                      Available Clinical Reports for HIL
+                      {availableClinicalFeedback.length > 0 && (
                         <Badge className="ml-1 bg-emerald-500/20 text-emerald-700 border-emerald-500/30 text-xs">
-                          {clinicalFeedback.length} pending
+                          {availableClinicalFeedback.length} available
                         </Badge>
                       )}
                     </CardTitle>
                     <div className="flex items-center gap-2">
-                      {clinicalFeedback.length > 0 && (
+                      {availableClinicalFeedback.length > 0 && (
                         <>
                           <Button
                             variant="outline"
@@ -714,23 +1322,35 @@ const AdminDashboard = () => {
                             onClick={toggleSelectAll}
                             className="gap-1.5 text-xs"
                           >
-                            {selectedFeedbackIds.size === clinicalFeedback.length ? (
+                            {selectedFeedbackIds.size === availableClinicalFeedback.length ? (
                               <XCircle className="w-3.5 h-3.5" />
                             ) : (
                               <CheckCircle className="w-3.5 h-3.5" />
                             )}
-                            {selectedFeedbackIds.size === clinicalFeedback.length ? "Deselect All" : "Select All"}
+                            {selectedFeedbackIds.size === availableClinicalFeedback.length ? "Deselect All" : "Select All"}
                           </Button>
                           {selectedFeedbackIds.size > 0 && (
-                            <Button
-                              size="sm"
-                              onClick={handleBatchApproveClinicalHIL}
-                              disabled={batchApproving}
-                              className="gap-1.5 bg-emerald-600 hover:bg-emerald-700 shadow-glow text-xs"
-                            >
-                              <Zap className="w-3.5 h-3.5" />
-                              {batchApproving ? "Approving..." : `Approve ${selectedFeedbackIds.size} Selected`}
-                            </Button>
+                            <>
+                              <Button
+                                size="sm"
+                                onClick={handleAddSelectedToFeedbackBatch}
+                                disabled={saving || !selectedFeedbackBatchId}
+                                className="gap-1.5 shadow-glow text-xs"
+                              >
+                                <Plus className="w-3.5 h-3.5" />
+                                Add {selectedFeedbackIds.size} to Batch
+                              </Button>
+                              <Button
+                                size="sm"
+                                onClick={handleBatchApproveClinicalHIL}
+                                disabled={batchApproving}
+                                variant="outline"
+                                className="gap-1.5 text-xs"
+                              >
+                                <Zap className="w-3.5 h-3.5" />
+                                {batchApproving ? "Approving..." : "Mark HIL Approved"}
+                              </Button>
+                            </>
                           )}
                         </>
                       )}
@@ -741,15 +1361,15 @@ const AdminDashboard = () => {
                   </div>
                 </CardHeader>
                 <CardContent>
-                  {clinicalFeedback.length === 0 ? (
+                  {availableClinicalFeedback.length === 0 ? (
                     <div className="text-center py-8 text-muted-foreground">
                       <CheckCircle className="w-10 h-10 mx-auto mb-3 opacity-40 text-emerald-500" />
-                      <p>No pending clinical reports to approve.</p>
-                      <p className="text-xs mt-1 opacity-60">Reports appear here when a doctor clicks "Approve as Final" on a scan.</p>
+                      <p>No available clinical reports to batch.</p>
+                      <p className="text-xs mt-1 opacity-60">Reports appear here when a doctor clicks "Approve as Final" and are removed after assignment.</p>
                     </div>
                   ) : (
                     <div className="space-y-4">
-                      {clinicalFeedback.map(fb => {
+                      {availableClinicalFeedback.map(fb => {
                         const previewImageUrl = getPreviewImageUrl(fb.scan);
                         const isSelected = selectedFeedbackIds.has(fb.id);
                         return (
@@ -775,6 +1395,9 @@ const AdminDashboard = () => {
                                 <h4 className="font-semibold text-foreground">Scan ID: {fb.scan_id?.slice(0, 8)}...</h4>
                                 <p className="text-sm text-muted-foreground">
                                   Submitted by: {fb.doctor?.full_name || fb.doctor?.email || "Unknown Doctor"}
+                                </p>
+                                <p className="text-xs text-muted-foreground">
+                                  Anonymous patient: {fb.scan?.patient_id?.slice(0, 8) || "unknown"} · {fb.patient?.age ? `${fb.patient.age}y` : "age N/A"} {fb.patient?.gender || ""} · {fb.scan?.scan_type?.toUpperCase() || "SCAN"}
                                 </p>
                               </div>
                               <Badge variant="outline" className={cn(
@@ -810,18 +1433,46 @@ const AdminDashboard = () => {
                                   <span className="font-semibold text-xs uppercase text-muted-foreground">Impression:</span>
                                   <p className="mt-1">{fb.edited_impression || fb.original_impression}</p>
                                 </div>
+                                {(fb.original_findings || fb.original_impression) && (
+                                  <div className="rounded-[12px] border border-border/50 bg-muted/30 p-2">
+                                    <span className="font-semibold text-xs uppercase text-muted-foreground">Original report:</span>
+                                    <p className="mt-1 text-xs text-muted-foreground">{[fb.original_findings, fb.original_impression].filter(Boolean).join(" ")}</p>
+                                  </div>
+                                )}
                               </div>
                             </div>
 
-                            <div className="flex justify-end mt-3 pt-3 border-t border-border/50" onClick={e => e.stopPropagation()}>
+                            <div className="flex justify-end gap-2 mt-3 pt-3 border-t border-border/50" onClick={e => e.stopPropagation()}>
                               <Button
-                                onClick={() => handleApproveClinicalHIL(fb.id)}
+                                onClick={async () => {
+                                  if (!selectedFeedbackBatchId) return;
+                                  setSaving(true);
+                                  try {
+                                    await addFeedbackToBatch(selectedFeedbackBatchId, [fb.id]);
+                                    toast.success("Example added to batch.");
+                                    await fetchHilFeedbackBatches();
+                                    await fetchClinicalFeedback();
+                                  } catch (e: unknown) {
+                                    toast.error(getErrorMessage(e) || "Failed to add example.");
+                                  } finally {
+                                    setSaving(false);
+                                  }
+                                }}
+                                size="sm"
+                                disabled={!selectedFeedbackBatchId}
+                                className="gap-2"
+                              >
+                                <Plus className="w-3.5 h-3.5" />
+                                Add to Selected Batch
+                              </Button>
+                              <Button
+                                onClick={() => handleDeleteFeedbackFromPool(fb.id)}
                                 size="sm"
                                 variant="outline"
-                                className="gap-2 text-emerald-700 border-emerald-500/40 hover:bg-emerald-50"
+                                className="gap-2 text-destructive border-destructive/30 hover:bg-destructive/10"
                               >
-                                <CheckCircle className="w-3.5 h-3.5" />
-                                Approve This One
+                                <Trash2 className="w-3.5 h-3.5" />
+                                Delete from Pool
                               </Button>
                             </div>
                           </div>
@@ -895,6 +1546,39 @@ const AdminDashboard = () => {
             <div><label className="text-sm font-medium text-foreground mb-1.5 block">Doctor Email</label><Input value={adminEmail} onChange={e => setAdminEmail(e.target.value)} placeholder="doctor@hospital.com" type="email" /></div>
           </div>
           <DialogFooter><Button variant="outline" onClick={() => setAdminModalOpen(false)}>Cancel</Button><Button onClick={handleAddAdmin} disabled={saving} className="shadow-glow gap-2"><Crown className="w-4 h-4" />{saving?"Promoting...":"Promote to Admin"}</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Create/Edit Clinical HIL Batch Modal */}
+      <Dialog open={feedbackBatchModalOpen} onOpenChange={setFeedbackBatchModalOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Upload className="w-5 h-5 text-primary" />
+              {editingFeedbackBatch ? "Edit Vision HIL Batch" : "Create Vision HIL Batch"}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div>
+              <label className="text-sm font-medium text-foreground mb-1.5 block">Batch Name</label>
+              <Input value={feedbackBatchTitle} onChange={e => setFeedbackBatchTitle(e.target.value)} placeholder="e.g., HIL Vision Batch - May Cases" />
+            </div>
+            <div>
+              <label className="text-sm font-medium text-foreground mb-1.5 block">Training Notes</label>
+              <Textarea value={feedbackBatchInstructions} onChange={e => setFeedbackBatchInstructions(e.target.value)} placeholder="Scope, modality, case mix, or reviewer notes..." className="min-h-[90px]" />
+            </div>
+            {!editingFeedbackBatch && selectedFeedbackIds.size > 0 && (
+              <div className="rounded-[16px] border border-primary/20 bg-primary/5 p-3 text-sm text-muted-foreground">
+                {selectedFeedbackIds.size} selected example{selectedFeedbackIds.size === 1 ? "" : "s"} will be added after the batch is created.
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setFeedbackBatchModalOpen(false)}>Cancel</Button>
+            <Button onClick={handleSaveFeedbackBatch} disabled={saving} className="shadow-glow">
+              {saving ? "Saving..." : editingFeedbackBatch ? "Update Batch" : "Create Batch"}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
@@ -1057,7 +1741,12 @@ const AdminDashboard = () => {
                         </div>
                       )}
                       {s.report.status === "approved" && (
-                        <Badge className="bg-emerald-500/10 text-emerald-600 border-emerald-500/30 mt-2"><CheckCircle className="w-3 h-3 mr-1" />Approved</Badge>
+                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                          <Badge className="bg-emerald-500/10 text-emerald-600 border-emerald-500/30"><CheckCircle className="w-3 h-3 mr-1" />Approved</Badge>
+                          <Button size="sm" variant="outline" onClick={() => handleAddApprovedHilReportToBatch(s)} disabled={!selectedFeedbackBatchId || saving}>
+                            <Plus className="w-3.5 h-3.5 mr-1" /> Add to Vision Pool
+                          </Button>
+                        </div>
                       )}
                       {s.report.status === "rejected" && (
                         <div className="mt-2 space-y-1">
@@ -1095,7 +1784,7 @@ const AdminDashboard = () => {
               return t ? (
                 <div className="rounded-[18px] border border-primary/20 bg-primary/5 px-4 py-3">
                   <p className="font-semibold text-foreground">{t.title}</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">{t.completed_scans} approved scan{t.completed_scans !== 1 ? "s" : ""} · {doctors.find(d => d.user_id === t.doctor_id)?.full_name || "Unknown"}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">{t.approved_scans ?? t.completed_scans} approved scan{(t.approved_scans ?? t.completed_scans) !== 1 ? "s" : ""} · {doctors.find(d => d.user_id === t.doctor_id)?.full_name || "Unknown"}</p>
                 </div>
               ) : null;
             })()}
@@ -1141,11 +1830,11 @@ const AdminDashboard = () => {
   );
 };
 
-function StatCard({ icon: Icon, label, value }: { icon: any; label: string; value: number }) {
+function StatCard({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: number }) {
   return (<Card className="metric-card"><CardContent className="pt-6"><div className="flex items-center gap-4"><div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/15 text-primary"><Icon className="h-6 w-6" /></div><div><p className="text-2xl font-bold text-foreground">{value}</p><p className="text-sm text-muted-foreground">{label}</p></div></div></CardContent></Card>);
 }
 
-function MetricBar({ icon: Icon, label, value, max, unit, hideIcon }: { icon: any; label: string; value: number; max: number; unit: string; hideIcon?: boolean }) {
+function MetricBar({ icon: Icon, label, value, max, unit, hideIcon }: { icon: LucideIcon; label: string; value: number; max: number; unit: string; hideIcon?: boolean }) {
   const pct = Math.min(100, Math.round((value/max)*100));
   const bar = pct > 85 ? "bg-destructive" : pct > 60 ? "bg-warning" : "bg-primary";
   return (<div><div className="flex items-center justify-between mb-1.5"><span className="text-sm text-muted-foreground flex items-center gap-1.5">{!hideIcon && <Icon className="w-3.5 h-3.5" />}{label}</span><span className="text-xs text-muted-foreground">{value.toLocaleString()}/{max.toLocaleString()} {unit}</span></div><div className="w-full h-2 rounded-full bg-muted overflow-hidden"><div className={cn("h-full rounded-full transition-all duration-500", bar)} style={{width:`${pct}%`}} /></div></div>);

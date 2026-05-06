@@ -19,6 +19,7 @@ import subprocess
 import time
 import requests
 import threading
+import queue
 from functools import lru_cache
 
 for _stream_name in ("stdout", "stderr"):
@@ -257,6 +258,8 @@ app = FastAPI(lifespan=lifespan)
 # Allowed origins: wildcard "*" with allow_credentials=True is invalid per the CORS spec.
 # Enumerate trusted origins so auth headers/cookies work from Vercel.
 CORS_ALLOWED_ORIGINS = [
+    "http://localhost:8080",
+    "http://127.0.0.1:8080",
     "http://localhost:5173",
     "http://localhost:3000",
     "http://127.0.0.1:5173",
@@ -625,11 +628,33 @@ class HILFinetuneRequest(_BaseModel):
     task_id: str
 
 _finetune_status = {"running": False, "last_result": None}
+_vision_hil_queue: "queue.Queue[str]" = queue.Queue()
+_vision_hil_worker_started = False
+_vision_hil_worker_lock = threading.Lock()
+
+VISION_HIL_DEFAULT_HYPERPARAMETERS = {
+    "epochs": 1,
+    "max_steps": 80,
+    "learning_rate": 1e-5,
+    "lora_r": 4,
+    "lora_alpha": 8,
+    "lora_dropout": 0.05,
+    "per_device_train_batch_size": 1,
+    "gradient_accumulation_steps": 8,
+    "max_samples": 64,
+    "image_size": 512,
+}
 
 def _get_supabase_client():
     """Create a Supabase client, reading creds from env or frontend .env."""
     import os as _os
-    from supabase import create_client
+    try:
+        from supabase import create_client
+    except ImportError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail="Backend dependency missing: install the 'supabase' Python package in the backend environment.",
+        ) from exc
 
     sb_url = _os.environ.get("SUPABASE_URL", "")
     sb_key = _os.environ.get("SUPABASE_SERVICE_KEY", _os.environ.get("SUPABASE_KEY", ""))
@@ -647,6 +672,34 @@ def _get_supabase_client():
     if not sb_url or not sb_key:
         return None, None, None
     return create_client(sb_url, sb_key), sb_url, sb_key
+
+
+def _get_supabase_service_client():
+    """Create a Supabase admin/service client for backend queue workers."""
+    import os as _os
+    try:
+        from supabase import create_client
+    except ImportError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail="Backend dependency missing: install the 'supabase' Python package in the backend environment.",
+        ) from exc
+
+    sb_url = _os.environ.get("SUPABASE_URL", "")
+    sb_key = _os.environ.get("SUPABASE_SERVICE_KEY", "")
+
+    if not sb_url:
+        env_path = _os.path.join(_os.path.dirname(__file__), "..", "frontend", ".env")
+        if _os.path.exists(env_path):
+            with open(env_path) as f:
+                for line in f:
+                    if line.startswith("VITE_SUPABASE_URL="):
+                        sb_url = line.split("=", 1)[1].strip()
+                        break
+
+    if not sb_url or not sb_key:
+        return None
+    return create_client(sb_url, sb_key)
 
 
 async def _verify_admin_jwt(authorization: str | None) -> str:
@@ -692,6 +745,166 @@ async def _verify_admin_jwt(authorization: str | None) -> str:
         raise HTTPException(status_code=403, detail="Admin access required")
 
     return user_id
+
+
+def _update_training_job(sb, job_id: str, values: dict):
+    try:
+        sb.table("hil_training_jobs").update(values).eq("id", job_id).execute()
+    except Exception as exc:
+        print(f"⚠️ Failed to update HIL training job {job_id}: {exc}")
+
+
+def _process_vision_hil_job(job_id: str):
+    sb = _get_supabase_service_client()
+    if not sb:
+        print("⚠️ SUPABASE_SERVICE_KEY is required for Vision HIL queue processing.")
+        return
+
+    try:
+        job_resp = sb.table("hil_training_jobs").select("*").eq("id", job_id).maybe_single().execute()
+        job = job_resp.data
+        if not job:
+            print(f"⚠️ HIL training job not found: {job_id}")
+            return
+
+        batch_id = job.get("batch_id")
+        _update_training_job(sb, job_id, {"status": "running", "started_at": _dt_now_iso(), "error": ""})
+        if batch_id:
+            sb.table("hil_feedback_batches").update({"status": "training"}).eq("id", batch_id).execute()
+
+        from vision_hil_finetune import build_samples_from_supabase, run_hil_vision_finetune
+
+        hp = {**VISION_HIL_DEFAULT_HYPERPARAMETERS, **(job.get("hyperparameters") or {})}
+        samples = build_samples_from_supabase(sb, batch_id, max_samples=int(hp.get("max_samples", 64)))
+        if len(samples) < 3:
+            raise RuntimeError(f"Need at least 3 usable samples. Got {len(samples)}.")
+
+        _update_training_job(sb, job_id, {"sample_count": len(samples)})
+        result = run_hil_vision_finetune(samples, job_id=job_id, hyperparameters=hp)
+        if result.get("error"):
+            raise RuntimeError(str(result["error"]))
+
+        _update_training_job(sb, job_id, {
+            "status": "completed",
+            "sample_count": result.get("num_samples", len(samples)),
+            "result": result,
+            "adapter_output_dir": result.get("adapter_output_dir", ""),
+            "backup_dir": result.get("backup_dir", ""),
+            "finished_at": _dt_now_iso(),
+        })
+        if batch_id:
+            sb.table("hil_feedback_batches").update({"status": "completed"}).eq("id", batch_id).execute()
+    except Exception as exc:
+        error = str(exc)
+        print(f"⚠️ Vision HIL fine-tuning job failed: {error}")
+        _update_training_job(sb, job_id, {"status": "failed", "error": error, "finished_at": _dt_now_iso()})
+        try:
+            job_resp = sb.table("hil_training_jobs").select("batch_id").eq("id", job_id).maybe_single().execute()
+            batch_id = (job_resp.data or {}).get("batch_id")
+            if batch_id:
+                sb.table("hil_feedback_batches").update({"status": "failed"}).eq("id", batch_id).execute()
+        except Exception:
+            pass
+
+
+def _vision_hil_worker():
+    while True:
+        job_id = _vision_hil_queue.get()
+        try:
+            _process_vision_hil_job(job_id)
+        finally:
+            _vision_hil_queue.task_done()
+
+
+def _ensure_vision_hil_worker_started():
+    global _vision_hil_worker_started
+    if _vision_hil_worker_started:
+        return
+    with _vision_hil_worker_lock:
+        if _vision_hil_worker_started:
+            return
+        threading.Thread(target=_vision_hil_worker, daemon=True, name="vision-hil-finetune-worker").start()
+        _vision_hil_worker_started = True
+
+
+def _dt_now_iso():
+    import datetime as _dt
+    return _dt.datetime.now(_dt.timezone.utc).isoformat()
+
+
+@app.post("/api/hil/vision-finetune-batches/{batch_id}/enqueue")
+async def enqueue_hil_vision_finetune(batch_id: str, authorization: str | None = Header(None)):
+    user_id = await _verify_admin_jwt(authorization)
+
+    sb = _get_supabase_service_client() or _get_supabase_client()[0]
+    if not sb:
+        raise HTTPException(status_code=500, detail="Supabase is not configured")
+
+    batch_resp = sb.table("hil_feedback_batches").select("*").eq("id", batch_id).maybe_single().execute()
+    batch = batch_resp.data
+    if not batch:
+        raise HTTPException(status_code=404, detail="HIL feedback batch not found")
+
+    items_resp = sb.table("hil_feedback_batch_items").select("id", count="exact").eq("batch_id", batch_id).execute()
+    sample_count = items_resp.count or len(items_resp.data or [])
+    if sample_count < 3:
+        raise HTTPException(status_code=400, detail=f"Need at least 3 examples to queue Vision fine-tuning. Got {sample_count}.")
+
+    existing_resp = (
+        sb.table("hil_training_jobs")
+        .select("*")
+        .eq("batch_id", batch_id)
+        .in_("status", ["queued", "running"])
+        .maybe_single()
+        .execute()
+    )
+    existing_job = getattr(existing_resp, "data", None) if existing_resp is not None else None
+    if existing_job:
+        return {
+            "status": existing_job["status"],
+            "job_id": existing_job["id"],
+            "sample_count": existing_job.get("sample_count", sample_count),
+            "message": "A training job is already queued or running for this batch.",
+        }
+
+    job_resp = sb.table("hil_training_jobs").insert({
+        "batch_id": batch_id,
+        "requested_by": user_id,
+        "model_target": "vision_agent",
+        "status": "queued",
+        "sample_count": sample_count,
+        "hyperparameters": VISION_HIL_DEFAULT_HYPERPARAMETERS,
+    }).execute()
+    job_rows = getattr(job_resp, "data", None) or []
+    if not job_rows:
+        raise HTTPException(status_code=500, detail="Failed to create HIL training job")
+    job = job_rows[0]
+
+    sb.table("hil_feedback_batches").update({
+        "status": "queued",
+        "queued_job_id": job["id"],
+    }).eq("id", batch_id).execute()
+
+    _ensure_vision_hil_worker_started()
+    _vision_hil_queue.put(job["id"])
+
+    return {
+        "status": "queued",
+        "job_id": job["id"],
+        "sample_count": sample_count,
+        "hyperparameters": VISION_HIL_DEFAULT_HYPERPARAMETERS,
+        "message": "Vision Agent HIL fine-tuning queued.",
+    }
+
+
+@app.get("/api/hil/vision-finetune-jobs")
+async def hil_vision_finetune_jobs(authorization: str | None = Header(None)):
+    await _verify_admin_jwt(authorization)
+    sb = _get_supabase_service_client() or _get_supabase_client()[0]
+    if not sb:
+        raise HTTPException(status_code=500, detail="Supabase is not configured")
+    jobs_resp = sb.table("hil_training_jobs").select("*").order("created_at", desc=True).limit(20).execute()
+    return {"jobs": jobs_resp.data or [], "queue_depth": _vision_hil_queue.qsize()}
 
 
 @app.post("/api/hil/finetune")

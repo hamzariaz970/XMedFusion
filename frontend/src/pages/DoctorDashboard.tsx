@@ -333,6 +333,58 @@ const DoctorDashboard = () => {
           </Card>
 
           <div className="space-y-6">
+            <Card className="surface-card border-primary/30 bg-primary/5">
+              <CardHeader>
+                <div className="flex items-center justify-between gap-3">
+                  <CardTitle className="flex items-center gap-2">
+                    <Brain className="h-5 w-5 text-primary" />
+                    HIL Labeling
+                  </CardTitle>
+                  <Badge variant="outline">{hilTasks.length} active</Badge>
+                </div>
+              </CardHeader>
+              <CardContent>
+                {hilTasks.length > 0 ? (
+                  <div className="space-y-3">
+                    {hilTasks.map((task) => {
+                      const progress = task.total_scans ? Math.round((task.completed_scans / task.total_scans) * 100) : 0;
+                      return (
+                        <button
+                          key={task.id}
+                          type="button"
+                          className="w-full rounded-[24px] border border-primary/10 bg-white/75 p-4 text-left transition-all duration-300 hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-card"
+                          onClick={() => navigate(`/hil/task/${task.id}`)}
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <p className="font-bold text-foreground">{task.title}</p>
+                              <p className="mt-1 text-xs text-muted-foreground">
+                                {task.completed_scans}/{task.total_scans} scans labeled
+                              </p>
+                            </div>
+                            <Badge variant="outline" className="capitalize">
+                              {task.status.replace("_", " ")}
+                            </Badge>
+                          </div>
+                          <Progress value={progress} className="mt-3 h-2" />
+                          <div className="mt-3 flex items-center justify-between text-xs font-semibold text-primary">
+                            <span>Start labeling</span>
+                            <ArrowRight className="h-3.5 w-3.5" />
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <EmptyState
+                    icon={Brain}
+                    title="No HIL tasks"
+                    copy="Assigned labeling batches will appear here."
+                  />
+                )}
+              </CardContent>
+            </Card>
+
             <Card className="surface-card">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
@@ -435,8 +487,8 @@ function EmptyState({
   icon: ElementType;
   title: string;
   copy: string;
-  action: string;
-  onAction: () => void;
+  action?: string;
+  onAction?: () => void;
 }) {
   return (
     <div className="flex flex-col items-center justify-center rounded-[24px] border border-dashed border-border bg-white/60 p-8 text-center">
@@ -445,10 +497,12 @@ function EmptyState({
       </div>
       <h3 className="font-bold text-foreground">{title}</h3>
       <p className="mt-2 max-w-sm text-sm leading-6 text-muted-foreground">{copy}</p>
-      <Button className="mt-5 gap-2" onClick={onAction}>
-        {action}
-        <ArrowRight className="h-4 w-4" />
-      </Button>
+      {action && onAction && (
+        <Button className="mt-5 gap-2" onClick={onAction}>
+          {action}
+          <ArrowRight className="h-4 w-4" />
+        </Button>
+      )}
     </div>
   );
 }

@@ -4,8 +4,8 @@
  */
 
 const NGROK_URL = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_BASE_URL_NGROK;
-const LOCAL_URL = import.meta.env.VITE_API_BASE_URL_LOCAL || "http://localhost:8000";
 const LOOPBACK_URL = "http://127.0.0.1:8000";
+const LOCAL_URL = import.meta.env.VITE_API_BASE_URL_LOCAL || LOOPBACK_URL;
 
 let cachedBaseUrl: string | null = null;
 
@@ -27,8 +27,20 @@ export const getNgrokHeaders = (baseUrl?: string): Record<string, string> => {
   return {};
 };
 
+const isFrontendOnLocalhost = () => {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  return ["localhost", "127.0.0.1"].includes(window.location.hostname);
+};
+
 const getCandidateBaseUrls = () => {
-  const candidates = [cachedBaseUrl, NGROK_URL, LOCAL_URL, LOOPBACK_URL]
+  const preferredUrls = isFrontendOnLocalhost()
+    ? [LOOPBACK_URL, LOCAL_URL, cachedBaseUrl, NGROK_URL]
+    : [cachedBaseUrl, NGROK_URL];
+
+  const candidates = preferredUrls
     .filter(Boolean)
     .map((url) => (url as string).replace(/\/$/, ""));
 
@@ -36,11 +48,9 @@ const getCandidateBaseUrls = () => {
 };
 
 /**
- * Probes whether an API base URL is reachable.
- *
- * Uses `no-cors` mode so the browser doesn't block the OPTIONS preflight,
- * which lets us detect connectivity. The real CORS check is enforced by the
- * backend on all subsequent credentialed requests (FastAPI CORSMiddleware).
+ * Probes whether an API base URL is the actual FastAPI backend.
+ * A generic reachable page is not enough here: stopped ngrok tunnels can still
+ * return HTML/error pages that would break upload requests later.
  */
 const canReachApi = async (baseUrl: string, timeoutMs = 2500) => {
   try {
@@ -55,14 +65,17 @@ const canReachApi = async (baseUrl: string, timeoutMs = 2500) => {
     const response = await fetch(url, {
       method: "GET",
       signal: controller.signal,
-      mode: "no-cors", // Intentional: we only care about reachability here
       headers: getNgrokHeaders(baseUrl),
     });
 
     clearTimeout(timeoutId);
-    // In no-cors mode the response type is "opaque" (status=0).
-    // If we didn't throw, the server is reachable.
-    return response.type === "opaque" || response.ok;
+    if (!response.ok) return false;
+
+    const contentType = response.headers.get("content-type") || "";
+    if (!contentType.includes("application/json")) return false;
+
+    const data = await response.json();
+    return data?.status === "healthy" || data?.status === "degraded";
   } catch (err) {
     console.warn(`Connection to ${baseUrl} failed:`, err);
     return false;
